@@ -1,52 +1,87 @@
 import React, { useState, useEffect } from 'react';
-import { UserMode, SolarReportData, Lead } from './types';
-import { generateSolarReport } from './services/geminiService';
+import { UserMode, SolarReportData, Lead, InstallerProfile } from './types';
+import { generateSolarReportWithData } from './services/geminiService';
+import { getCoordinates, getSolarInsights } from './services/googleMapsService';
 import SolarReport from './components/SolarReport';
 import LeadMarketplace from './components/LeadMarketplace';
-import { LayoutDashboard, Home, Loader2, Sun, Search, X } from 'lucide-react';
+import ChatAssistant from './components/ChatAssistant';
+import AddressAutocomplete from './components/AddressAutocomplete';
+import { LayoutDashboard, Home, Sun, Lock, LogIn, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<UserMode>(UserMode.HOMEOWNER);
-  const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<SolarReportData | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '' });
+  
+  // Feature 8: Installer Profile / Login
+  const [installerProfile, setInstallerProfile] = useState<InstallerProfile | null>(null);
+  const [loginForm, setLoginForm] = useState({ user: '', pass: '' });
+
+  // Mock Installer Location (São Paulo center)
+  const installerLocation = { lat: -23.5505, lng: -46.6333 };
 
   // Load leads from local storage simulation
   useEffect(() => {
-    // Initial mock data if empty
     if (leads.length === 0) {
         setLeads([
             {
                 id: '1',
                 homeownerName: 'Ana Silva',
                 address: 'Av. Paulista, 1000, São Paulo, SP',
+                lat: -23.5657,
+                lng: -46.6514,
                 phoneNumber: '(11) 99876-5432',
                 email: 'ana.silva@exemplo.com.br',
                 estimatedSystemSize: 8.5,
                 generatedAt: new Date().toISOString(),
                 status: 'available',
-                price: 45
+                price: 45,
+                distanceKm: 3.2
+            },
+            {
+                id: '2',
+                homeownerName: 'Carlos Oliveira',
+                address: 'Rua das Flores, 123, Curitiba, PR',
+                lat: -25.4284,
+                lng: -49.2733,
+                phoneNumber: '(41) 98765-4321',
+                email: 'carlos.o@exemplo.com.br',
+                estimatedSystemSize: 5.2,
+                generatedAt: new Date(Date.now() - 86400000).toISOString(),
+                status: 'sold',
+                price: 40,
+                distanceKm: 350
             }
         ])
     }
-  }, []); // Run once on mount
+  }, []);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!address.trim()) return;
-
+  const handleSearch = async (address: string) => {
     setLoading(true);
     setReport(null);
     try {
-      const data = await generateSolarReport(address);
+      const coords = await getCoordinates(address);
+      const solarData = await getSolarInsights(coords.lat, coords.lng);
+      const data = await generateSolarReportWithData(coords.formattedAddress, coords.lat, coords.lng, solarData, 300);
       setReport(data);
-    } catch (error) {
-      alert("Falha ao gerar o relatório. Verifique sua chave API e tente novamente.");
+    } catch (error: any) {
+      alert(`Erro: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecalculate = async (newBill: number) => {
+    if (!report) return;
+    try {
+        const solarData = await getSolarInsights(report.lat, report.lng); 
+        const newData = await generateSolarReportWithData(report.address, report.lat, report.lng, solarData, newBill);
+        setReport(newData);
+    } catch (error) {
+        console.error("Recalc error", error);
     }
   };
 
@@ -60,10 +95,13 @@ const App: React.FC = () => {
       email: formData.email,
       phoneNumber: formData.phone,
       address: report.address,
+      lat: report.lat,
+      lng: report.lng,
       estimatedSystemSize: report.systemSizeKw,
       generatedAt: new Date().toISOString(),
       status: 'available',
-      price: 50 // Flat rate for leads
+      price: 50,
+      distanceKm: 0 // In real app, calculate actual distance
     };
 
     setLeads(prev => [newLead, ...prev]);
@@ -71,13 +109,29 @@ const App: React.FC = () => {
     setFormData({ name: '', email: '', phone: '' });
     alert("Sua solicitação de orçamento foi enviada para instaladores avaliados!");
     setReport(null);
-    setAddress('');
   };
 
   const buyLead = (id: string) => {
     setLeads(prev => prev.map(lead => 
       lead.id === id ? { ...lead, status: 'sold' } : lead
     ));
+    alert("Lead adquirido com sucesso! Dados de contato desbloqueados.");
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+      e.preventDefault();
+      // Mock Login
+      if(loginForm.user) {
+          setInstallerProfile({
+              id: 'inst-1',
+              name: 'Solar Tech Solutions',
+              company: 'Solar Tech',
+              credits: 450,
+              rating: 4.8,
+              location: installerLocation
+          });
+          setMode(UserMode.INSTALLER);
+      }
   };
 
   return (
@@ -101,14 +155,14 @@ const App: React.FC = () => {
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mode === UserMode.HOMEOWNER ? 'text-orange-600 bg-orange-50' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 <Home className="w-4 h-4" />
-                Proprietários
+                <span className="hidden md:inline">Proprietários</span>
               </button>
               <button 
-                onClick={() => setMode(UserMode.INSTALLER)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mode === UserMode.INSTALLER ? 'text-blue-600 bg-blue-50' : 'text-slate-600 hover:text-slate-900'}`}
+                onClick={() => setMode(installerProfile ? UserMode.INSTALLER : UserMode.LOGIN)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mode === UserMode.INSTALLER || mode === UserMode.LOGIN ? 'text-blue-600 bg-blue-50' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 <LayoutDashboard className="w-4 h-4" />
-                Instaladores
+                <span className="hidden md:inline">Instaladores</span>
               </button>
             </div>
           </div>
@@ -123,42 +177,22 @@ const App: React.FC = () => {
             
             {!report && (
               <div className="w-full max-w-3xl text-center space-y-8 mt-10">
-                <div className="space-y-4">
+                <div className="space-y-4 animate-fade-in-up">
                     <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 tracking-tight">
-                    Energize sua casa com <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-600">Luz Solar</span>
+                    Dados Reais do <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-600">Google Solar API</span>
                     </h1>
                     <p className="text-xl text-slate-500 max-w-2xl mx-auto">
-                    Obtenha um relatório instantâneo de economia solar via IA para seu endereço e conecte-se com instaladores locais verificados.
+                    Relatórios precisos usando imagens de satélite 3D e dados de irradiação reais para o seu telhado.
                     </p>
                 </div>
 
-                <div className="bg-white p-2 rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 flex items-center max-w-xl mx-auto transform transition-transform focus-within:scale-105">
-                    <div className="pl-4 text-slate-400">
-                        <MapPinIcon className="w-6 h-6" />
-                    </div>
-                    <form onSubmit={handleSearch} className="flex-1 flex">
-                        <input
-                        type="text"
-                        placeholder="Digite o endereço da sua casa..."
-                        className="w-full px-4 py-4 text-lg bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-800"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        />
-                        <button 
-                        type="submit" 
-                        disabled={loading}
-                        className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed m-1"
-                        >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
-                        {loading ? 'Analisando...' : 'Analisar'}
-                        </button>
-                    </form>
-                </div>
+                {/* Feature 1: Autocomplete Component */}
+                <AddressAutocomplete onSelect={handleSearch} isLoading={loading} />
                 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left mt-16 opacity-80">
-                    <FeatureItem title="Análise Instantânea" desc="IA estima economia baseada no seu telhado." icon={<Sun className="w-5 h-5 text-yellow-500"/>} />
-                    <FeatureItem title="Instaladores Verificados" desc="Receba orçamentos de profissionais locais." icon={<CheckShieldIcon className="w-5 h-5 text-blue-500"/>} />
-                    <FeatureItem title="Relatório Grátis" desc="Sem custo, sem compromisso de verificar economia." icon={<ZapIcon className="w-5 h-5 text-orange-500"/>} />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left mt-16 opacity-80 animate-fade-in delay-150">
+                    <FeatureItem title="Visão Cinemática" desc="Vídeo aéreo do seu imóvel em alta definição." icon={<Sun className="w-5 h-5 text-yellow-500"/>} />
+                    <FeatureItem title="Heatmap Solar" desc="Veja exatamente onde o sol bate no seu telhado." icon={<Sun className="w-5 h-5 text-orange-500"/>} />
+                    <FeatureItem title="Cálculo de Tarifas" desc="IA verifica o custo do kWh na sua cidade." icon={<Lock className="w-5 h-5 text-blue-500"/>} />
                 </div>
               </div>
             )}
@@ -169,20 +203,71 @@ const App: React.FC = () => {
                     onClick={() => setReport(null)}
                     className="mb-6 flex items-center text-sm text-slate-500 hover:text-slate-900 transition-colors"
                 >
-                    <ArrowLeftIcon className="w-4 h-4 mr-1" /> Voltar à Busca
+                    <Home className="w-4 h-4 mr-1" /> Voltar à Busca
                 </button>
-                <SolarReport data={report} onUnlock={() => setShowForm(true)} />
+                <SolarReport 
+                    data={report} 
+                    onUnlock={() => setShowForm(true)} 
+                    onRecalculate={handleRecalculate}
+                />
               </div>
             )}
           </div>
         )}
 
-        {mode === UserMode.INSTALLER && (
+        {/* Feature 8: Login Screen */}
+        {mode === UserMode.LOGIN && (
+             <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-3xl shadow-xl border border-slate-200 text-center animate-scale-in">
+                 <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                     <Lock className="w-8 h-8 text-blue-600" />
+                 </div>
+                 <h2 className="text-2xl font-bold mb-2">Portal do Instalador</h2>
+                 <p className="text-slate-500 mb-6">Acesse leads qualificados na sua região.</p>
+                 <form onSubmit={handleLogin} className="space-y-4">
+                     <input 
+                        type="email" 
+                        placeholder="E-mail corporativo" 
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
+                        value={loginForm.user}
+                        onChange={e => setLoginForm({...loginForm, user: e.target.value})}
+                     />
+                     <input 
+                        type="password" 
+                        placeholder="Senha" 
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
+                        value={loginForm.pass}
+                        onChange={e => setLoginForm({...loginForm, pass: e.target.value})}
+                     />
+                     <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-colors">
+                         Entrar
+                     </button>
+                 </form>
+             </div>
+        )}
+
+        {mode === UserMode.INSTALLER && installerProfile && (
           <div className="animate-fade-in">
-            <LeadMarketplace leads={leads} onBuyLead={buyLead} />
+            <div className="flex justify-between items-center mb-6 bg-slate-900 text-white p-4 rounded-xl">
+                 <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center font-bold">
+                         {installerProfile.company.charAt(0)}
+                     </div>
+                     <div>
+                         <p className="font-bold">{installerProfile.company}</p>
+                         <p className="text-xs text-slate-300">Créditos: {installerProfile.credits}</p>
+                     </div>
+                 </div>
+                 <button onClick={() => setMode(UserMode.LOGIN)} className="text-sm text-slate-300 hover:text-white flex items-center gap-1">
+                     <LogIn className="w-4 h-4" /> Sair
+                 </button>
+            </div>
+            <LeadMarketplace leads={leads} onBuyLead={buyLead} installerLocation={installerProfile.location} />
           </div>
         )}
       </main>
+
+      {/* Feature 7: Chat Assistant with Grounding */}
+      <ChatAssistant />
 
       {/* Lead Capture Modal */}
       {showForm && (
@@ -196,8 +281,8 @@ const App: React.FC = () => {
             </button>
             
             <div className="bg-slate-900 p-8 text-white text-center">
-                <h3 className="text-2xl font-bold mb-2">Receba Seu Orçamento Grátis</h3>
-                <p className="text-slate-300 text-sm">Conecte-se com instaladores para verificar sua economia de {report?.annualSavings ? `R$ ${report.annualSavings.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : ''}.</p>
+                <h3 className="text-2xl font-bold mb-2">Garanta sua Economia</h3>
+                <p className="text-slate-300 text-sm">Receba propostas personalizadas para sua conta de R$ {report?.monthlyBill}.</p>
             </div>
 
             <form onSubmit={handleLeadSubmit} className="p-8 space-y-4">
@@ -207,18 +292,18 @@ const App: React.FC = () => {
                   required
                   type="text"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all outline-none"
-                  placeholder="João Silva"
+                  placeholder="Seu Nome"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Endereço de E-mail</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                 <input
                   required
                   type="email"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all outline-none"
-                  placeholder="joao@exemplo.com.br"
+                  placeholder="email@exemplo.com"
                   value={formData.email}
                   onChange={e => setFormData({...formData, email: e.target.value})}
                 />
@@ -229,7 +314,7 @@ const App: React.FC = () => {
                   required
                   type="tel"
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all outline-none"
-                  placeholder="(11) 99999-9999"
+                  placeholder="(DDD) 99999-9999"
                   value={formData.phone}
                   onChange={e => setFormData({...formData, phone: e.target.value})}
                 />
@@ -239,11 +324,8 @@ const App: React.FC = () => {
                 type="submit"
                 className="w-full bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-orange-500/25 transition-all transform active:scale-95 mt-4"
               >
-                Enviar Solicitação de Orçamento
+                Solicitar 3 Orçamentos Grátis
               </button>
-              <p className="text-xs text-center text-slate-400 mt-4">
-                Ao enviar, você concorda em receber contatos sobre energia solar de nossos parceiros.
-              </p>
             </form>
           </div>
         </div>
@@ -251,23 +333,6 @@ const App: React.FC = () => {
     </div>
   );
 };
-
-// Simple Icons Components for UI
-const MapPinIcon = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-);
-
-const CheckShieldIcon = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg>
-);
-
-const ZapIcon = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-);
-
-const ArrowLeftIcon = ({ className }: { className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
-);
 
 const FeatureItem = ({ title, desc, icon }: { title: string, desc: string, icon: React.ReactNode }) => (
     <div className="flex gap-4 items-start p-4 rounded-xl hover:bg-white hover:shadow-sm transition-all">

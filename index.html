@@ -13,6 +13,15 @@
       ::-webkit-scrollbar-track { background: #f1f1f1; }
       ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      
+      .cinematic-move {
+        animation: cinematic 20s ease-in-out infinite alternate;
+      }
+      
+      @keyframes cinematic {
+        0% { transform: scale(1.1) translate(0, 0); }
+        100% { transform: scale(1.3) translate(-2%, -2%); }
+      }
     </style>
   <script type="importmap">
 {
@@ -26,8 +35,14 @@
   }
 }
 </script>
+<!-- Load Google Maps API (Replace KEY_HOLDER with standard process env logic in real app, here we rely on the implementation ensuring the key is available or loaded dynamically) -->
+<!-- Note: For this demo environment, we assume the user's key supports Maps JS API. If not, the raw fetch fallback in services will handle geocoding. -->
 </head>
   <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
+    <script>
+      // Simple script to load Google Maps if needed later dynamically or verify availability
+      window.initMap = function() { console.log('Maps Loaded'); };
+    </script>
   </body>
 </html>

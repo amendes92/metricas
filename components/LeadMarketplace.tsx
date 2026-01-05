@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Lead } from '../types';
-import { MapPin, Calendar, Zap, CheckCircle, User, Phone, Mail, Download, Map as MapIcon, LayoutGrid, Navigation, Bell } from 'lucide-react';
+import { MapPin, Calendar, Zap, CheckCircle, User, Phone, Mail, Download, Map as MapIcon, LayoutGrid, Navigation, Bell, FileText, ChevronDown } from 'lucide-react';
 import { getStaticMapUrl, getDirectionsUrl } from '../services/googleMapsService';
+import { jsPDF } from 'jspdf';
 
 interface LeadMarketplaceProps {
   leads: Lead[];
   onBuyLead: (id: string) => void;
+  onUpdateLeadStatus: (id: string, newStatus: any) => void;
   installerLocation: { lat: number, lng: number };
 }
 
-const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, installerLocation }) => {
+const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onUpdateLeadStatus, installerLocation }) => {
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [notification, setNotification] = useState<Lead | null>(null);
 
@@ -39,8 +41,8 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, ins
   }, [installerLocation]);
 
   const exportCSV = () => {
-    const headers = ["ID", "Nome", "Endereço", "Sistema (kW)", "Preço", "Status", "Data"];
-    const rows = leads.map(l => [l.id, l.homeownerName, `"${l.address}"`, l.estimatedSystemSize, l.price, l.status, l.generatedAt]);
+    const headers = ["ID", "Nome", "Endereço", "Sistema (kW)", "Preço", "Status", "Pipeline", "Data"];
+    const rows = leads.map(l => [l.id, l.homeownerName, `"${l.address}"`, l.estimatedSystemSize, l.price, l.status, l.pipelineStatus || 'N/A', l.generatedAt]);
     
     const csvContent = "data:text/csv;charset=utf-8," 
         + headers.join(",") + "\n" 
@@ -53,6 +55,87 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, ins
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const generateProposalPDF = (lead: Lead) => {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      // -- Header --
+      doc.setFillColor(249, 115, 22); // Orange 500
+      doc.rect(0, 0, pageWidth, 40, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(24);
+      doc.setFont('helvetica', 'bold');
+      doc.text("SolarSavian", 20, 20);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text("Proposta Comercial de Energia Solar", 20, 30);
+
+      // -- Client Info --
+      doc.setTextColor(30, 41, 59); // Slate 800
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text("Dados do Cliente", 20, 60);
+      
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      doc.setDrawColor(200, 200, 200);
+      doc.line(20, 63, pageWidth - 20, 63);
+
+      doc.text(`Nome: ${lead.homeownerName}`, 20, 75);
+      doc.text(`Endereço: ${lead.address}`, 20, 85);
+      doc.text(`Data da Proposta: ${new Date().toLocaleDateString('pt-BR')}`, 20, 95);
+
+      // -- Technical Info --
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text("Especificações Técnicas", 20, 115);
+      doc.line(20, 118, pageWidth - 20, 118);
+
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      
+      // Estimated math based on kWp
+      const annualSavings = (lead.estimatedSystemSize * 115 * 0.92 * 12).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const monthlyProd = (lead.estimatedSystemSize * 115).toFixed(0);
+
+      doc.text(`Potência do Sistema: ${lead.estimatedSystemSize} kWp`, 20, 130);
+      doc.text(`Produção Média Estimada: ${monthlyProd} kWh/mês`, 20, 140);
+      doc.text(`Economia Anual Estimada: ${annualSavings}`, 20, 150);
+
+      // -- Commercial Box --
+      doc.setDrawColor(249, 115, 22);
+      doc.setLineWidth(1);
+      doc.rect(20, 170, pageWidth - 40, 50);
+      
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text("Próximos Passos", 30, 185);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text("1. Visita técnica para avaliação do telhado.", 30, 195);
+      doc.text("2. Aprovação do projeto junto à concessionária.", 30, 205);
+      doc.text("3. Instalação e homologação.", 30, 215);
+
+      // -- Footer --
+      doc.setFontSize(9);
+      doc.setTextColor(150, 150, 150);
+      doc.text("Documento gerado automaticamente via SolarSavian Marketplace.", 20, 280);
+
+      doc.save(`Proposta_${lead.homeownerName.replace(/\s/g, '_')}.pdf`);
+  };
+
+  const getStatusColor = (status: string) => {
+      switch(status) {
+          case 'Novo': return 'bg-blue-100 text-blue-700 border-blue-200';
+          case 'Contatado': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+          case 'Visita': return 'bg-purple-100 text-purple-700 border-purple-200';
+          case 'Fechado': return 'bg-green-100 text-green-700 border-green-200';
+          default: return 'bg-slate-100 text-slate-700 border-slate-200';
+      }
   };
 
   const soldCount = leads.filter(l => l.status === 'sold').length;
@@ -171,10 +254,20 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, ins
 
                     <div className="p-6 flex-grow">
                         <div className="space-y-3">
-                            <span className="text-xs text-slate-400 flex items-center gap-1 mb-2">
-                                <Calendar className="w-3 h-3" />
-                                {new Date(lead.generatedAt).toLocaleDateString('pt-BR')}
-                            </span>
+                            <div className="flex justify-between items-start">
+                                <span className="text-xs text-slate-400 flex items-center gap-1 mb-2">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(lead.generatedAt).toLocaleDateString('pt-BR')}
+                                </span>
+                                
+                                {/* CRM STATUS BADGE (Only for Sold) */}
+                                {lead.status === 'sold' && lead.pipelineStatus && (
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getStatusColor(lead.pipelineStatus)}`}>
+                                        {lead.pipelineStatus}
+                                    </span>
+                                )}
+                            </div>
+                            
                         <div className="flex items-start gap-3">
                             <MapPin className="w-5 h-5 text-slate-400 mt-0.5" />
                             <p className="text-slate-800 font-medium line-clamp-2">{lead.address}</p>
@@ -186,25 +279,59 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, ins
                         </div>
 
                         {lead.status === 'sold' ? (
-                            <div className="mt-4 pt-4 border-t border-slate-100 space-y-2 bg-slate-50 p-3 rounded-lg">
-                                <div className="flex items-center gap-2 text-slate-700">
-                                    <User className="w-4 h-4 text-slate-400" />
-                                    <span className="font-medium">{lead.homeownerName}</span>
+                            <div className="mt-4 pt-4 border-t border-slate-100 space-y-3 bg-slate-50 p-3 rounded-lg">
+                                
+                                {/* Contact Info */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2 text-slate-700">
+                                        <User className="w-4 h-4 text-slate-400" />
+                                        <span className="font-medium">{lead.homeownerName}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-slate-700">
+                                        <Phone className="w-4 h-4 text-slate-400" />
+                                        <span>{lead.phoneNumber}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-slate-700">
+                                        <Mail className="w-4 h-4 text-slate-400" />
+                                        <span className="text-sm truncate">{lead.email}</span>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2 text-slate-700">
-                                    <Phone className="w-4 h-4 text-slate-400" />
-                                    <span>{lead.phoneNumber}</span>
+
+                                {/* Mini-CRM Actions */}
+                                <div className="pt-3 border-t border-slate-200">
+                                    <p className="text-[10px] uppercase font-bold text-slate-400 mb-2">Gestão do Lead</p>
+                                    
+                                    {/* Pipeline Selector */}
+                                    <div className="relative mb-3">
+                                        <select 
+                                            value={lead.pipelineStatus || 'Novo'} 
+                                            onChange={(e) => onUpdateLeadStatus(lead.id, e.target.value)}
+                                            className="w-full appearance-none bg-white border border-slate-300 text-slate-700 py-2 px-3 pr-8 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="Novo">🔵 Novo</option>
+                                            <option value="Contatado">🟡 Contatado</option>
+                                            <option value="Visita">🟣 Visita Agendada</option>
+                                            <option value="Fechado">🟢 Fechado</option>
+                                        </select>
+                                        <ChevronDown className="w-3 h-3 text-slate-500 absolute right-3 top-2.5 pointer-events-none" />
+                                    </div>
+
+                                    {/* PDF Generator Button */}
+                                    <button 
+                                        onClick={() => generateProposalPDF(lead)}
+                                        className="w-full flex items-center justify-center gap-2 bg-white border border-orange-200 text-orange-600 hover:bg-orange-50 py-2 rounded-lg text-xs font-bold transition-colors"
+                                    >
+                                        <FileText className="w-3 h-3" />
+                                        Baixar Proposta Formal
+                                    </button>
                                 </div>
-                                <div className="flex items-center gap-2 text-slate-700">
-                                    <Mail className="w-4 h-4 text-slate-400" />
-                                    <span className="text-sm truncate">{lead.email}</span>
-                                </div>
-                                {/* Feature 6: Google Maps Route Link */}
+
+                                {/* Google Maps Route Link */}
                                 <a 
                                     href={getDirectionsUrl(installerLocation.lat, installerLocation.lng, lead.lat, lead.lng)}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="flex items-center justify-center gap-2 w-full mt-2 bg-blue-100 text-blue-700 py-2 rounded-lg text-xs font-bold hover:bg-blue-200 transition-colors"
+                                    className="flex items-center justify-center gap-2 w-full mt-1 bg-blue-100 text-blue-700 py-2 rounded-lg text-xs font-bold hover:bg-blue-200 transition-colors"
                                 >
                                     <Navigation className="w-3 h-3" />
                                     Abrir Rota GPS

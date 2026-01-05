@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { SolarReportData, SolarPanel } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Sun, DollarSign, Leaf, BatteryCharging, TreePine, Car, RefreshCw, Layers, Grid3X3, Map as MapIcon, Info } from 'lucide-react';
+import { Sun, DollarSign, Leaf, BatteryCharging, TreePine, Car, RefreshCw, Layers, Grid3X3, Map as MapIcon, Users, CreditCard, CheckCircle, Loader2, X, MessageCircle } from 'lucide-react';
 import { getStaticMapUrl, getApiKey } from '../services/googleMapsService';
 
 interface SolarReportProps {
@@ -14,6 +14,14 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   const [billValue, setBillValue] = useState(data.monthlyBill || 300);
   const [isUpdating, setIsUpdating] = useState(false);
   const [viewMode, setViewMode] = useState<'heatmap' | 'panels'>('panels');
+  
+  // Growth Hacking States
+  const [showCreditModal, setShowCreditModal] = useState(false);
+  const [creditStep, setCreditStep] = useState<'input' | 'analyzing' | 'approved'>('input');
+  const [creditForm, setCreditForm] = useState({ cpf: '', phone: '' });
+
+  // Social Proof Random Number (Stable per render)
+  const neighborsCount = useMemo(() => Math.floor(Math.random() * (28 - 12 + 1)) + 12, []);
   
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapInstance = useRef<any>(null);
@@ -88,18 +96,14 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   }, [data.lat, data.lng, viewMode]);
 
   // Helper to interpolate colors for Heatmap
-  // Low (Blue) -> Medium (Yellow) -> High (Red)
   const getHeatmapColor = (normalizedValue: number) => {
-    // normalizedValue is 0 to 1
     if (normalizedValue < 0.5) {
-        // Interpolate Blue (#3b82f6) to Yellow (#eab308)
         const t = normalizedValue * 2; 
         const r = Math.floor(59 + (234 - 59) * t);
         const g = Math.floor(130 + (179 - 130) * t);
         const b = Math.floor(246 + (8 - 246) * t);
         return `rgb(${r},${g},${b})`;
     } else {
-        // Interpolate Yellow (#eab308) to Red (#ef4444)
         const t = (normalizedValue - 0.5) * 2;
         const r = Math.floor(234 + (239 - 234) * t);
         const g = Math.floor(179 + (68 - 179) * t);
@@ -111,7 +115,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   const updateOverlays = () => {
     if (!window.google || !window.google.maps || !googleMapInstance.current || !data.solarPotential) return;
 
-    // Clear existing overlays
     if (overlaysRef.current) {
         overlaysRef.current.forEach(o => o.setMap(null));
     }
@@ -147,14 +150,11 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
              let strokeWeight = 1;
 
              if (viewMode === 'heatmap') {
-                // Calculate normalized energy potential (0 to 1)
                 const range = maxEnergy - minEnergy || 1;
                 const norm = (panel.yearlyEnergyDcKwh - minEnergy) / range;
-                
                 fillColor = getHeatmapColor(norm);
-                // Reduce stroke for cleaner heatmap look, match fill color slightly darker
                 strokeColor = fillColor; 
-                fillOpacity = 0.75; // Slightly more opaque for visibility
+                fillOpacity = 0.75; 
                 strokeWeight = 0.5;
              }
 
@@ -197,6 +197,32 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
     });
   };
 
+  // --- Growth Actions ---
+
+  const handleWhatsAppClick = () => {
+    // Format message
+    const savings = data.annualSavings.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const address = data.address.split(',')[0]; // Short address
+    const message = `Olá, vi o relatório da minha casa na ${address} e quero validar a economia de R$ ${savings}/ano.`;
+    
+    // Replace with your real sales number
+    const phoneNumber = "5511999999999"; 
+    
+    const link = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
+    window.open(link, '_blank');
+  };
+
+  const handleCreditCheck = (e: React.FormEvent) => {
+      e.preventDefault();
+      setCreditStep('analyzing');
+      // Simulate API call
+      setTimeout(() => {
+          setCreditStep('approved');
+      }, 2500);
+  };
+
+  // ----------------------
+
   const safeMonthlySavings = Array.isArray(data.monthlySavings) ? data.monthlySavings : Array(12).fill(0);
 
   const chartData = safeMonthlySavings.map((val, idx) => ({
@@ -223,8 +249,16 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   const hasSolarData = !!data.solarPotential;
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-8 animate-fade-in-up pb-20">
+    <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in-up pb-20">
       
+      {/* Banner de Escassez / Prova Social */}
+      <div className="bg-blue-600 text-white p-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 animate-pulse-slow">
+         <Users className="w-5 h-5 text-blue-200" />
+         <p className="font-medium text-sm md:text-base text-center">
+            🔥 <strong>{neighborsCount} vizinhos</strong> no seu bairro analisaram o potencial solar esta semana.
+         </p>
+      </div>
+
       {/* Header with Map Container */}
       <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-slate-200 bg-slate-900 h-[500px] group transition-all duration-500">
         
@@ -409,8 +443,8 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         {/* Sidebar Column */}
         <div className="space-y-6">
             
-            {/* Financing Simulator */}
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            {/* Financing Simulator Card */}
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 relative overflow-hidden">
                 <h3 className="text-lg font-bold text-slate-900 mb-6">Comparativo Mensal</h3>
                 <div className="relative">
                     <div className="absolute left-4 top-8 bottom-8 w-0.5 bg-slate-100"></div>
@@ -437,10 +471,16 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                         </div>
                     </div>
                 </div>
-                <div className="mt-6 pt-6 border-t border-slate-100">
-                     <p className="text-xs text-slate-400 text-center">
+                <div className="mt-6 pt-6 border-t border-slate-100 flex flex-col items-center">
+                     <p className="text-xs text-slate-400 text-center mb-3">
                         *Baseado em 60x com juros de 1.5% a.m.
                     </p>
+                    <button 
+                        onClick={() => { setCreditStep('input'); setShowCreditModal(true); }}
+                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline font-bold bg-blue-50 px-3 py-1.5 rounded-full transition-colors"
+                    >
+                        <CreditCard className="w-3 h-3" /> Verificar aprovação de crédito
+                    </button>
                 </div>
             </div>
 
@@ -474,23 +514,101 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                 </div>
             </div>
 
-            {/* Call to Action */}
-            <div className="bg-gradient-to-br from-orange-500 to-yellow-500 rounded-3xl p-8 text-white text-center shadow-lg shadow-orange-500/20 transform hover:scale-[1.02] transition-transform">
-                <h3 className="text-2xl font-bold mb-2">Gostou dos números?</h3>
+            {/* Call to Action - WhatsApp Conversion */}
+            <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-3xl p-8 text-white text-center shadow-lg shadow-green-500/20 transform hover:scale-[1.02] transition-transform">
+                <h3 className="text-2xl font-bold mb-2">Garanta essa Economia</h3>
                 <p className="text-white/90 mb-8">
-                    Receba 3 orçamentos gratuitos de instaladores certificados na sua região.
+                    Fale agora com um especialista e valide este projeto para sua casa.
                 </p>
                 <button 
-                onClick={onUnlock}
-                className="w-full bg-white text-orange-600 font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-orange-50 transition-colors"
+                    onClick={handleWhatsAppClick}
+                    className="w-full bg-white text-green-700 font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-green-50 transition-colors flex items-center justify-center gap-2"
                 >
-                Solicitar Orçamentos
+                    <MessageCircle className="w-5 h-5" />
+                    Receber Proposta no WhatsApp
                 </button>
+                <p className="text-[10px] text-green-100 mt-3">Resposta média: 5 minutos</p>
             </div>
 
         </div>
 
       </div>
+
+      {/* Credit Simulator Modal */}
+      {showCreditModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-scale-in relative">
+                  <button onClick={() => setShowCreditModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+                      <X className="w-5 h-5" />
+                  </button>
+                  
+                  <div className="bg-slate-900 p-6 text-white text-center">
+                      <CreditCard className="w-8 h-8 mx-auto mb-2 text-blue-400" />
+                      <h3 className="text-xl font-bold">Pré-Aprovação</h3>
+                      <p className="text-slate-300 text-xs">Simulação sem compromisso.</p>
+                  </div>
+
+                  <div className="p-6">
+                      {creditStep === 'input' && (
+                          <form onSubmit={handleCreditCheck} className="space-y-4">
+                              <div>
+                                  <label className="text-xs font-bold text-slate-500 uppercase">CPF</label>
+                                  <input 
+                                    type="text" 
+                                    required
+                                    placeholder="000.000.000-00"
+                                    className="w-full border-b-2 border-slate-200 py-2 focus:border-blue-500 outline-none transition-colors"
+                                    value={creditForm.cpf}
+                                    onChange={e => setCreditForm({...creditForm, cpf: e.target.value})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold text-slate-500 uppercase">Celular</label>
+                                  <input 
+                                    type="tel" 
+                                    required
+                                    placeholder="(11) 99999-9999"
+                                    className="w-full border-b-2 border-slate-200 py-2 focus:border-blue-500 outline-none transition-colors"
+                                    value={creditForm.phone}
+                                    onChange={e => setCreditForm({...creditForm, phone: e.target.value})}
+                                  />
+                              </div>
+                              <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-colors mt-4">
+                                  Verificar Crédito
+                              </button>
+                          </form>
+                      )}
+
+                      {creditStep === 'analyzing' && (
+                          <div className="text-center py-8">
+                              <Loader2 className="w-10 h-10 text-blue-500 animate-spin mx-auto mb-4" />
+                              <p className="font-bold text-slate-700">Consultando Score...</p>
+                              <p className="text-xs text-slate-400">Conectando aos bureaus de crédito.</p>
+                          </div>
+                      )}
+
+                      {creditStep === 'approved' && (
+                          <div className="text-center py-4">
+                              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                  <CheckCircle className="w-6 h-6 text-green-600" />
+                              </div>
+                              <h4 className="text-xl font-bold text-green-700 mb-2">Pré-Aprovado!</h4>
+                              <p className="text-sm text-slate-600 mb-4">
+                                  Temos uma linha de crédito disponível para o seu perfil com carência de 90 dias.
+                              </p>
+                              <button 
+                                onClick={handleWhatsAppClick}
+                                className="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition-colors"
+                              >
+                                  Finalizar no WhatsApp
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };

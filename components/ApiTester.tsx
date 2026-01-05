@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { getApiKey, getCoordinates, getSolarInsights } from '../services/googleMapsService';
-import { GoogleGenAI } from "@google/genai";
-import { Terminal, CheckCircle, Map as MapIcon, Sun, Brain } from 'lucide-react';
+import { Terminal, CheckCircle, Map as MapIcon, Sun, Brain, Server } from 'lucide-react';
 
 interface LogEntry {
   timestamp: string;
@@ -22,14 +21,32 @@ const ApiTester: React.FC = () => {
 
   const clearLogs = () => setLogs([]);
 
+  // 0. Test Backend Connectivity
+  const testBackend = async () => {
+      setIsLoading(true);
+      addLog('Pingando servidor backend (http://localhost:3001/api/health)...', 'info');
+      try {
+          const res = await fetch('http://localhost:3001/api/health');
+          if (!res.ok) throw new Error(`Status: ${res.status}`);
+          const data = await res.json();
+          addLog('Backend Online!', 'success', data);
+          return true;
+      } catch (e: any) {
+          addLog('Backend OFF ou Inacessível. O app usará Fallback (API Direta).', 'error', { error: e.message });
+          return false;
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
   // 1. Test API Key Availability
   const testApiKey = () => {
     const key = getApiKey();
     if (key && key.startsWith('AIza')) {
-      addLog(`API Key encontrada: ${key.substring(0, 10)}...`, 'success');
+      addLog(`API Key (Frontend) encontrada: ${key.substring(0, 10)}...`, 'success');
       return true;
     } else {
-      addLog('API Key inválida ou não encontrada.', 'error');
+      addLog('API Key inválida ou não encontrada no Frontend.', 'error');
       return false;
     }
   };
@@ -37,21 +54,21 @@ const ApiTester: React.FC = () => {
   // 2. Test Geocoding API
   const testGeocoding = async () => {
     setIsLoading(true);
-    addLog('Iniciando teste de Geocoding...', 'info');
+    addLog('Iniciando teste de Geocoding (Backend -> Fallback Direct)...', 'info');
     try {
       const address = "Av. Paulista, 1578, São Paulo";
       addLog(`Buscando coordenadas para: ${address}`);
       
       const result = await getCoordinates(address);
       
-      if (result.formattedAddress.includes("Simulado") || result.formattedAddress.includes("Offline")) {
-          addLog('Geocoding retornou dados de FALLBACK (Simulado). A API pode estar falhando ou cota excedida.', 'error', result);
+      if (result.formattedAddress.includes("Offline")) {
+          addLog('Geocoding falhou totalmente (Backend e Direct). Verifique a conexão e a API Key.', 'error', result);
       } else {
           addLog('Geocoding Sucesso!', 'success', result);
           setTestCoords({ lat: result.lat, lng: result.lng });
       }
     } catch (e: any) {
-      addLog(`Erro no Geocoding: ${e.message}`, 'error');
+      addLog(`Erro Crítico no Geocoding: ${e.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -73,9 +90,9 @@ const ApiTester: React.FC = () => {
       const data = await getSolarInsights(testCoords.lat, testCoords.lng);
       
       if (!data) {
-        addLog('Solar API falhou ou local sem cobertura solar.', 'error');
+        addLog('Solar API retornou null. Pode ser falta de cobertura, erro de CORS (no fallback) ou erro 404.', 'error');
       } else {
-        addLog('Solar API Sucesso! Dados recebidos.', 'success', data); // Logs raw JSON
+        addLog('Solar API Sucesso!', 'success', data); 
         addLog(`Painéis Máximos: ${data.solarPotential?.maxArrayPanelsCount}`, 'info');
       }
     } catch (e: any) {
@@ -88,20 +105,25 @@ const ApiTester: React.FC = () => {
   // 4. Test Gemini API
   const testGemini = async () => {
     setIsLoading(true);
-    addLog('Iniciando teste do Gemini Flash 2.5...', 'info');
+    addLog('Iniciando teste do Gemini (Backend -> Fallback SDK)...', 'info');
+    
+    // Using the service function directly to test the fallback logic
+    const { generateSolarReportWithData } = await import('../services/geminiService');
+    
     try {
-        const apiKey = getApiKey();
-        const ai = new GoogleGenAI({ apiKey });
+        // Mock data to avoid Solar API dependency for this specific test
+        const mockSolar = { solarPotential: { maxArrayPanelsCount: 20, wholeRoofStats: { areaMeters2: 50 }, roofSegmentStats: [] } };
         
-        addLog('Enviando prompt: "Explique o que é energia fotovoltaica em 1 frase."');
-        
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: 'Explique o que é energia fotovoltaica em uma frase curta.',
-        });
-        
-        const text = response.text;
-        addLog('Gemini Resposta:', 'success', { text });
+        // We use a dummy address to trigger the generation
+        const report = await generateSolarReportWithData(
+            'Teste de API', 
+            -23.55, 
+            -46.63, 
+            mockSolar, 
+            300
+        );
+
+        addLog('Gemini Resposta Sucesso:', 'success', { summary: report.summary, savings: report.annualSavings });
     } catch (e: any) {
         addLog(`Erro no Gemini: ${e.message}`, 'error');
     } finally {
@@ -121,13 +143,18 @@ const ApiTester: React.FC = () => {
             
             <div className="space-y-3">
                 <div className="p-3 bg-slate-900 rounded-lg border border-slate-700">
-                    <p className="text-xs text-slate-400 mb-1">API Key em uso:</p>
+                    <p className="text-xs text-slate-400 mb-1">API Key Ativa:</p>
                     <code className="text-green-400 text-xs break-all">{getApiKey()}</code>
                 </div>
 
+                <button onClick={testBackend} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left border border-slate-600">
+                    <Server className="w-5 h-5 text-pink-400" />
+                    <span>0. Checar Backend</span>
+                </button>
+
                 <button onClick={testApiKey} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left">
                     <CheckCircle className="w-5 h-5 text-green-400" />
-                    <span>1. Validar Chave</span>
+                    <span>1. Validar Key (Front)</span>
                 </button>
 
                 <button onClick={testGeocoding} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left">
@@ -137,12 +164,12 @@ const ApiTester: React.FC = () => {
 
                 <button onClick={testSolar} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left">
                     <Sun className="w-5 h-5 text-yellow-400" />
-                    <span>3. Testar Solar API (JSON)</span>
+                    <span>3. Testar Solar API</span>
                 </button>
 
                 <button onClick={testGemini} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left">
                     <Brain className="w-5 h-5 text-purple-400" />
-                    <span>4. Testar Gemini 2.5</span>
+                    <span>4. Testar Gemini</span>
                 </button>
             </div>
 
@@ -165,7 +192,7 @@ const ApiTester: React.FC = () => {
                             <span className="text-slate-500 text-xs mt-0.5">[{log.timestamp}]</span>
                             {log.type === 'info' && <span className="text-blue-400">INFO:</span>}
                             {log.type === 'success' && <span className="text-green-400">OK:</span>}
-                            {log.type === 'error' && <span className="text-red-500">ERR:</span>}
+                            {log.type === 'error' && <span className="text-red-500 font-bold">ERR:</span>}
                             <span className="text-slate-200">{log.message}</span>
                         </div>
                         {log.data && (

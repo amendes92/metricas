@@ -78,6 +78,8 @@ export interface Lead {
   status: 'available' | 'sold';
   price: number;
   distanceKm?: number; // Distance from installer
+  // CRM Status
+  pipelineStatus?: 'Novo' | 'Contatado' | 'Visita' | 'Fechado';
 }
 
 export enum UserMode {

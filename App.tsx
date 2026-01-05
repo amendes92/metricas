@@ -60,7 +60,8 @@ const App: React.FC = () => {
                 generatedAt: new Date().toISOString(),
                 status: 'available',
                 price: 45,
-                distanceKm: 3.2
+                distanceKm: 3.2,
+                pipelineStatus: 'Novo'
             },
             {
                 id: '2',
@@ -74,7 +75,8 @@ const App: React.FC = () => {
                 generatedAt: new Date(Date.now() - 86400000).toISOString(),
                 status: 'sold',
                 price: 40,
-                distanceKm: 350
+                distanceKm: 350,
+                pipelineStatus: 'Fechado'
             }
         ])
     }
@@ -122,7 +124,8 @@ const App: React.FC = () => {
       generatedAt: new Date().toISOString(),
       status: 'available',
       price: 50,
-      distanceKm: 0 // In real app, calculate actual distance
+      distanceKm: 0, // In real app, calculate actual distance
+      pipelineStatus: 'Novo'
     };
 
     setLeads(prev => [newLead, ...prev]);
@@ -134,9 +137,15 @@ const App: React.FC = () => {
 
   const buyLead = (id: string) => {
     setLeads(prev => prev.map(lead => 
-      lead.id === id ? { ...lead, status: 'sold' } : lead
+      lead.id === id ? { ...lead, status: 'sold', pipelineStatus: 'Novo' } : lead
     ));
     alert("Lead adquirido com sucesso! Dados de contato desbloqueados.");
+  };
+
+  const updateLeadStatus = (id: string, newStatus: any) => {
+      setLeads(prev => prev.map(lead =>
+          lead.id === id ? { ...lead, pipelineStatus: newStatus } : lead
+      ));
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -347,7 +356,12 @@ const App: React.FC = () => {
                      <LogIn className="w-4 h-4" /> Sair
                  </button>
             </div>
-            <LeadMarketplace leads={leads} onBuyLead={buyLead} installerLocation={installerProfile.location} />
+            <LeadMarketplace 
+                leads={leads} 
+                onBuyLead={buyLead} 
+                onUpdateLeadStatus={updateLeadStatus}
+                installerLocation={installerProfile.location} 
+            />
           </div>
         )}
       </main>

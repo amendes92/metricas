@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { UserMode, SolarReportData, Lead, InstallerProfile } from './types';
 import { generateSolarReportWithData } from './services/geminiService';
-import { getCoordinates, getSolarInsights } from './services/googleMapsService';
+import { getCoordinates, getSolarInsights, getApiKey } from './services/googleMapsService';
 import SolarReport from './components/SolarReport';
 import LeadMarketplace from './components/LeadMarketplace';
 import ChatAssistant from './components/ChatAssistant';
 import AddressAutocomplete from './components/AddressAutocomplete';
-import { LayoutDashboard, Home, Sun, Lock, LogIn, X } from 'lucide-react';
+import ApiTester from './components/ApiTester';
+import { LayoutDashboard, Home, Sun, Lock, LogIn, X, Settings, Key, FlaskConical } from 'lucide-react';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<UserMode>(UserMode.HOMEOWNER);
@@ -20,8 +21,27 @@ const App: React.FC = () => {
   const [installerProfile, setInstallerProfile] = useState<InstallerProfile | null>(null);
   const [loginForm, setLoginForm] = useState({ user: '', pass: '' });
 
+  // Feature: API Key Management
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
   // Mock Installer Location (São Paulo center)
   const installerLocation = { lat: -23.5505, lng: -46.6333 };
+
+  useEffect(() => {
+      // Load API key from storage on mount
+      const stored = localStorage.getItem('solar_api_key');
+      if (stored) setApiKeyInput(stored);
+      else setApiKeyInput(getApiKey());
+  }, []);
+
+  const handleSaveApiKey = () => {
+      if(apiKeyInput.trim()) {
+          localStorage.setItem('solar_api_key', apiKeyInput.trim());
+          alert("Chave salva! A página será recarregada para aplicar as mudanças.");
+          window.location.reload();
+      }
+  };
 
   // Load leads from local storage simulation
   useEffect(() => {
@@ -134,6 +154,25 @@ const App: React.FC = () => {
       }
   };
 
+  if (mode === UserMode.TEST_MODE) {
+    return (
+      <div className="min-h-screen bg-slate-900">
+        <nav className="bg-slate-800 border-b border-slate-700 p-4 sticky top-0 z-50">
+           <div className="max-w-7xl mx-auto flex justify-between items-center text-white">
+              <div className="flex items-center gap-2">
+                 <FlaskConical className="w-6 h-6 text-green-400" />
+                 <span className="font-bold text-lg">Área de Testes (Debug)</span>
+              </div>
+              <button onClick={() => setMode(UserMode.HOMEOWNER)} className="text-sm hover:text-green-400 transition-colors">
+                 Voltar para App
+              </button>
+           </div>
+        </nav>
+        <ApiTester />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Navigation */}
@@ -149,7 +188,7 @@ const App: React.FC = () => {
               </span>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 md:space-x-4">
               <button 
                 onClick={() => setMode(UserMode.HOMEOWNER)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${mode === UserMode.HOMEOWNER ? 'text-orange-600 bg-orange-50' : 'text-slate-600 hover:text-slate-900'}`}
@@ -163,6 +202,24 @@ const App: React.FC = () => {
               >
                 <LayoutDashboard className="w-4 h-4" />
                 <span className="hidden md:inline">Instaladores</span>
+              </button>
+              
+              {/* Test Button */}
+              <button 
+                onClick={() => setMode(UserMode.TEST_MODE)}
+                className="p-2 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors"
+                title="Testar APIs"
+              >
+                  <FlaskConical className="w-5 h-5" />
+              </button>
+
+              {/* Settings Button */}
+              <button 
+                onClick={() => setShowSettings(true)}
+                className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-colors"
+                title="Configurar API Key"
+              >
+                  <Settings className="w-5 h-5" />
               </button>
             </div>
           </div>
@@ -330,6 +387,48 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* API Key Modal */}
+      {showSettings && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 relative animate-scale-in">
+                 <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-800">
+                     <X className="w-5 h-5" />
+                 </button>
+                 <div className="flex items-center gap-3 mb-4">
+                     <div className="bg-blue-100 p-2 rounded-lg">
+                         <Key className="w-6 h-6 text-blue-600" />
+                     </div>
+                     <h3 className="text-xl font-bold text-slate-800">Configuração de API</h3>
+                 </div>
+                 <p className="text-sm text-slate-500 mb-4">
+                     Insira sua chave da Google Cloud Platform. Ela deve ter as APIs: <strong>Solar, Maps JavaScript, Maps 3D Tiles, Geocoding</strong> e <strong>Gemini</strong> ativadas.
+                 </p>
+                 <input 
+                    type="text" 
+                    className="w-full border border-slate-300 rounded-lg p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 mb-4"
+                    placeholder="Cole sua API Key aqui (AIza...)"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                 />
+                 <div className="flex justify-end gap-2">
+                     <button 
+                        onClick={() => setShowSettings(false)}
+                        className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-lg"
+                     >
+                         Cancelar
+                     </button>
+                     <button 
+                        onClick={handleSaveApiKey}
+                        className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700"
+                     >
+                         Salvar e Recarregar
+                     </button>
+                 </div>
+             </div>
+          </div>
+      )}
+
     </div>
   );
 };

@@ -1,28 +1,30 @@
 import { GoogleGenAI } from "@google/genai";
 import { SolarReportData } from "../types";
+import { getApiKey } from "./googleMapsService";
 
-// Robust API Key retrieval
-const getUserKey = () => {
-  try {
-    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-      return process.env.API_KEY;
-    }
-  } catch (e) {
-    // process is not defined
-  }
-  return 'AIzaSyDnPfZQAuZP9Hl3S734fvXM1q4UrxhXZ-w';
+// Remove top-level initialization to prevent crash on module load if key is invalid
+// const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+// Helper to get client instance safely
+const getAiClient = () => {
+    return new GoogleGenAI({ apiKey: getApiKey() });
 };
 
-const ai = new GoogleGenAI({ apiKey: getUserKey() });
+// Refresh instance if key changes (helper for UI)
+export const reinitializeGemini = () => {
+    return getAiClient();
+};
 
 export const generateSolarReportWithData = async (
   address: string, 
   lat: number, 
   lng: number, 
   solarData: any | null,
-  monthlyBill: number = 300 // Default bill in BRL
+  monthlyBill: number = 300
 ): Promise<SolarReportData> => {
   
+  // Use lazy client
+  const currentAi = getAiClient();
   const modelId = "gemini-2.5-flash"; 
 
   let dataContext = "";
@@ -70,7 +72,7 @@ export const generateSolarReportWithData = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await currentAi.models.generateContent({
       model: modelId,
       contents: prompt,
       config: { 
@@ -101,6 +103,11 @@ export const generateSolarReportWithData = async (
 
     data.maxPanels = solarData?.solarPotential?.maxArrayPanelsCount || Math.ceil((data.systemSizeKw * 1000) / 400);
 
+    // IMPORTANT: Inject raw solar data for the map visualization
+    if (solarData && solarData.solarPotential) {
+        data.solarPotential = solarData.solarPotential;
+    }
+
     if (!data.monthlySavings || data.monthlySavings.length !== 12) {
       data.monthlySavings = Array(12).fill(data.annualSavings / 12);
     }
@@ -113,6 +120,7 @@ export const generateSolarReportWithData = async (
 };
 
 export const chatWithSolarExpert = async (history: {role: string, parts: {text: string}[]}[], userMessage: string, context?: string) => {
+    const currentAi = getAiClient(); // Lazy init
     const modelId = "gemini-2.5-flash";
     const systemInstruction = `
         Você é o SolarBot, assistente da SolarSavian.
@@ -120,7 +128,7 @@ export const chatWithSolarExpert = async (history: {role: string, parts: {text: 
         Responda dúvidas sobre o relatório acima, inversores, baterias e financiamento no Brasil.
     `;
 
-    const chat = ai.chats.create({
+    const chat = currentAi.chats.create({
         model: modelId,
         history: history,
         config: {

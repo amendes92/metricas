@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SolarReportData, SolarPanel } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Sun, DollarSign, Leaf, BatteryCharging, TreePine, Car, RefreshCw, Layers, Grid3X3, Video, Map as MapIcon, Rotate3D } from 'lucide-react';
+import { Sun, DollarSign, Leaf, BatteryCharging, TreePine, Car, RefreshCw, Layers, Grid3X3, Map as MapIcon, Info } from 'lucide-react';
 import { getStaticMapUrl, getApiKey } from '../services/googleMapsService';
 
 interface SolarReportProps {
@@ -13,15 +13,13 @@ interface SolarReportProps {
 const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate }) => {
   const [billValue, setBillValue] = useState(data.monthlyBill || 300);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [viewMode, setViewMode] = useState<'cinematic' | 'heatmap' | 'panels'>('panels');
+  const [viewMode, setViewMode] = useState<'heatmap' | 'panels'>('panels');
   
   const mapRef = useRef<HTMLDivElement>(null);
-  const map3dRef = useRef<any>(null); // Ref for gmp-map-3d element
   const googleMapInstance = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
-  const animationRef = useRef<number | null>(null);
 
-  // Initialize Maps API (Now including maps3d library)
+  // Initialize Standard Maps API (2D Only)
   useEffect(() => {
     let isMounted = true;
 
@@ -29,14 +27,14 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         if (!isMounted) return;
         
         // 2D Map Logic
-        if (viewMode !== 'cinematic' && mapRef.current && window.google && window.google.maps) {
+        if (mapRef.current && window.google && window.google.maps) {
             if (!googleMapInstance.current) {
                 try {
                     googleMapInstance.current = new window.google.maps.Map(mapRef.current, {
                         center: { lat: data.lat, lng: data.lng },
                         zoom: 20,
                         mapTypeId: 'satellite',
-                        tilt: 0,
+                        tilt: 0, // No tilt for clearer 2D view
                         disableDefaultUI: true,
                         zoomControl: true,
                         mapTypeControl: false,
@@ -48,11 +46,12 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                     console.error("Error initializing Google Maps:", e);
                 }
             }
+            // Update center if data changes
+            googleMapInstance.current.setCenter({ lat: data.lat, lng: data.lng });
             updateOverlays();
         }
     };
 
-    // Check if API loaded, if not load with specific params for 3D
     if (window.google && window.google.maps) {
         initMap();
     } else {
@@ -64,12 +63,10 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         } else {
             const script = document.createElement('script');
             script.id = scriptId;
-            // IMPORTANT: v=beta and libraries=maps3d are required for Photorealistic 3D Tiles
-            // Dynamically fetching key
-            script.src = `https://maps.googleapis.com/maps/api/js?key=${getApiKey()}&v=beta&libraries=maps3d,geometry,places`;
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${getApiKey()}&libraries=geometry,places`;
             script.async = true;
             script.defer = true;
-            script.crossOrigin = "anonymous"; // Helps with capturing specific script errors
+            script.crossOrigin = "anonymous"; 
             script.onload = () => {
                 if (isMounted) initMap();
             };
@@ -82,7 +79,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
 
     return () => {
         isMounted = false;
-        // Cleanup listener if possible
         const scriptId = 'google-maps-script';
         const existingScript = document.getElementById(scriptId) as HTMLScriptElement;
         if (existingScript) {
@@ -91,32 +87,26 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
     };
   }, [data.lat, data.lng, viewMode]);
 
-  // Animation Logic for 3D Mode
-  useEffect(() => {
-      if (viewMode === 'cinematic') {
-          let angle = 0;
-          const animate = () => {
-              // Safety check: Ensure ref exists and component is still in 3D mode
-              if (map3dRef.current) {
-                  angle = (angle + 0.1) % 360; // Smooth rotation
-                  try {
-                      // Only set property if the element is upgraded and property exists to avoid Script Errors
-                      // or just set it safely
-                      map3dRef.current.heading = angle;
-                  } catch (e) {
-                      // Element might not be upgraded yet, ignore
-                  }
-              }
-              animationRef.current = requestAnimationFrame(animate);
-          };
-          animationRef.current = requestAnimationFrame(animate);
-      } else {
-          if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      }
-      return () => {
-          if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      };
-  }, [viewMode]);
+  // Helper to interpolate colors for Heatmap
+  // Low (Blue) -> Medium (Yellow) -> High (Red)
+  const getHeatmapColor = (normalizedValue: number) => {
+    // normalizedValue is 0 to 1
+    if (normalizedValue < 0.5) {
+        // Interpolate Blue (#3b82f6) to Yellow (#eab308)
+        const t = normalizedValue * 2; 
+        const r = Math.floor(59 + (234 - 59) * t);
+        const g = Math.floor(130 + (179 - 130) * t);
+        const b = Math.floor(246 + (8 - 246) * t);
+        return `rgb(${r},${g},${b})`;
+    } else {
+        // Interpolate Yellow (#eab308) to Red (#ef4444)
+        const t = (normalizedValue - 0.5) * 2;
+        const r = Math.floor(234 + (239 - 234) * t);
+        const g = Math.floor(179 + (68 - 179) * t);
+        const b = Math.floor(8 + (68 - 8) * t);
+        return `rgb(${r},${g},${b})`;
+    }
+  };
 
   const updateOverlays = () => {
     if (!window.google || !window.google.maps || !googleMapInstance.current || !data.solarPotential) return;
@@ -129,7 +119,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
 
     const solarPotential = data.solarPotential;
     
-    // Safety check for configs
     if (!solarPotential.solarPanelConfigs || solarPotential.solarPanelConfigs.length === 0) {
         return;
     }
@@ -138,7 +127,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         (prev.panelsCount > current.panelsCount) ? prev : current
     , solarPotential.solarPanelConfigs[0]);
 
-    // Safety check for solarPanels array
     if (!bestConfig.solarPanels || !Array.isArray(bestConfig.solarPanels)) {
         return;
     }
@@ -156,21 +144,26 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
              let fillColor = '#3b82f6';
              let strokeColor = '#2563eb';
              let fillOpacity = 0.6;
+             let strokeWeight = 1;
 
              if (viewMode === 'heatmap') {
-                const norm = (panel.yearlyEnergyDcKwh - minEnergy) / (maxEnergy - minEnergy || 1);
-                const g = Math.floor(255 * (1 - norm));
-                fillColor = `rgb(255, ${g}, 0)`;
-                strokeColor = `rgb(200, ${g}, 0)`;
-                fillOpacity = 0.8;
+                // Calculate normalized energy potential (0 to 1)
+                const range = maxEnergy - minEnergy || 1;
+                const norm = (panel.yearlyEnergyDcKwh - minEnergy) / range;
+                
+                fillColor = getHeatmapColor(norm);
+                // Reduce stroke for cleaner heatmap look, match fill color slightly darker
+                strokeColor = fillColor; 
+                fillOpacity = 0.75; // Slightly more opaque for visibility
+                strokeWeight = 0.5;
              }
 
              try {
                 const polygon = new window.google.maps.Polygon({
                     paths: paths,
                     strokeColor: strokeColor,
-                    strokeOpacity: 0.8,
-                    strokeWeight: 1,
+                    strokeOpacity: 0.9,
+                    strokeWeight: strokeWeight,
                     fillColor: fillColor,
                     fillOpacity: fillOpacity,
                     map: googleMapInstance.current
@@ -204,7 +197,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
     });
   };
 
-  // Safe access to monthlySavings
   const safeMonthlySavings = Array.isArray(data.monthlySavings) ? data.monthlySavings : Array(12).fill(0);
 
   const chartData = safeMonthlySavings.map((val, idx) => ({
@@ -236,61 +228,40 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
       {/* Header with Map Container */}
       <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-slate-200 bg-slate-900 h-[500px] group transition-all duration-500">
         
-        {/* Render Logic: 3D Mode vs 2D Mode */}
-        {viewMode === 'cinematic' ? (
-             <div className="w-full h-full animate-fade-in">
-                 {/* @ts-ignore */}
-                 <gmp-map-3d 
-                    ref={map3dRef}
-                    center={`${data.lat},${data.lng}`} 
-                    range="400" 
-                    tilt="60" 
-                    heading="0"
-                    style={{width: '100%', height: '100%'}}
-                 >
-                     {/* Marker anchored to the 3D mesh */}
-                     {/* @ts-ignore */}
-                     <gmp-marker-3d position={`${data.lat},${data.lng}`} altitude-mode="RELATIVE_TO_MESH">
-                        <div className="bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-xl border border-white transform -translate-y-8 flex flex-col items-center">
-                            <span>Sua Casa</span>
-                            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-orange-600 absolute -bottom-2"></div>
-                        </div>
-                     {/* @ts-ignore */}
-                     </gmp-marker-3d>
-                 {/* @ts-ignore */}
-                 </gmp-map-3d>
-                 <div className="absolute top-4 left-4 z-20 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-white/20">
-                     <span className="text-white text-xs font-bold flex items-center gap-2">
-                         <Rotate3D className="w-3 h-3 animate-spin-slow" /> 
-                         3D Imersivo (Photorealistic Tiles)
-                     </span>
-                 </div>
-             </div>
+        {/* Render 2D Map or Fallback Image */}
+        {hasSolarData ? (
+            <div ref={mapRef} className="w-full h-full opacity-100" />
         ) : (
-            hasSolarData ? (
-                <div ref={mapRef} className="w-full h-full opacity-100" />
-            ) : (
-                <img 
-                    src={getStaticMapUrl(data.lat, data.lng, 20, '1200x800')} 
-                    alt="Satellite View" 
-                    className="w-full h-full object-cover opacity-80"
-                />
-            )
+            <img 
+                src={getStaticMapUrl(data.lat, data.lng, 20, '1200x800')} 
+                alt="Satellite View" 
+                className="w-full h-full object-cover opacity-80"
+            />
         )}
         
+        {/* Heatmap Legend - Only visible in heatmap mode */}
+        {viewMode === 'heatmap' && (
+            <div className="absolute top-20 right-4 z-20 bg-white/95 backdrop-blur-md p-3 rounded-xl shadow-lg border border-slate-200 w-44 animate-fade-in">
+                <div className="flex items-center gap-2 mb-2">
+                    <Sun className="w-3 h-3 text-orange-500" />
+                    <p className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">Potencial de Energia</p>
+                </div>
+                {/* Gradient Bar */}
+                <div className="h-2 w-full rounded-full bg-gradient-to-r from-blue-500 via-yellow-500 to-red-500 mb-1"></div>
+                <div className="flex justify-between text-[10px] text-slate-500 font-medium">
+                    <span>Baixo</span>
+                    <span>Médio</span>
+                    <span>Alto</span>
+                </div>
+            </div>
+        )}
+
         {/* View Controls */}
         <div className="absolute top-4 right-4 z-20 flex gap-2">
             <button 
-                onClick={() => setViewMode('cinematic')}
-                className={`p-3 rounded-full backdrop-blur-md border transition-all ${viewMode === 'cinematic' ? 'bg-purple-600 border-purple-400 text-white shadow-lg shadow-purple-500/50' : 'bg-black/60 border-transparent text-slate-300 hover:bg-black/80'}`}
-                title="Imersão 3D"
-            >
-                <Video className="w-5 h-5" />
-            </button>
-            <button 
                 onClick={() => setViewMode('heatmap')}
                 className={`p-3 rounded-full backdrop-blur-md border transition-all ${viewMode === 'heatmap' ? 'bg-orange-500/90 border-orange-400 text-white' : 'bg-black/60 border-transparent text-slate-300 hover:bg-black/80'}`}
-                title="Mapa de Irradiação (Heatmap)"
+                title="Mapa de Calor (Irradiação)"
             >
                 <Sun className="w-5 h-5" />
             </button>
@@ -311,7 +282,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                         <span className="bg-yellow-500 text-slate-900 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wider">
                             {data.roofQuality === 'Excellent' ? 'Telhado Premium' : 'Análise Técnica'}
                         </span>
-                        {hasSolarData && viewMode !== 'cinematic' && (
+                        {hasSolarData && (
                             <span className="flex items-center gap-1 text-green-400 text-xs bg-green-900/50 px-2 py-1 rounded-md border border-green-500/30">
                                 <Layers className="w-3 h-3" /> {data.solarPotential?.solarPanelConfigs?.[0]?.panelsCount || data.solarPotential?.maxArrayPanelsCount} Painéis
                              </span>
@@ -322,7 +293,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                     </h2>
                     <p className="opacity-90 text-lg flex items-center gap-2 text-slate-300">
                         <MapIcon className="w-4 h-4" /> 
-                        {viewMode === 'cinematic' ? 'Tour Virtual 360º' : viewMode === 'heatmap' ? 'Análise de Irradiação' : 'Layout Sugerido'}
+                        {viewMode === 'heatmap' ? 'Análise de Irradiação Solar' : 'Layout Sugerido de Instalação'}
                     </p>
                 </div>
                 

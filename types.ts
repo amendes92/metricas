@@ -102,32 +102,10 @@ export interface InstallerProfile {
   location: { lat: number, lng: number };
 }
 
-// Google Maps 3D Types & Global Augmentations
+// Global Augmentations
 declare global {
   interface Window {
     google: any;
     initMap: () => void;
-  }
-  
-  namespace JSX {
-    interface IntrinsicElements {
-      'gmp-map-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-        center?: string; // lat,lng string or object
-        tilt?: string | number;
-        heading?: string | number;
-        range?: string | number;
-        'default-labels-disabled'?: boolean | string;
-      };
-      'gmp-polygon-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-          'altitude-mode'?: string;
-          fillColor?: string;
-          strokeColor?: string;
-          strokeWidth?: string | number;
-      };
-      'gmp-marker-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-          position?: string;
-          'altitude-mode'?: string;
-      };
-    }
   }
 }

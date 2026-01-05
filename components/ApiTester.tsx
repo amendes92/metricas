@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { getApiKey, getCoordinates, getSolarInsights } from '../services/googleMapsService';
 import { GoogleGenAI } from "@google/genai";
-import { Terminal, Play, CheckCircle, XCircle, Map as MapIcon, Sun, Brain, Box } from 'lucide-react';
+import { Terminal, CheckCircle, Map as MapIcon, Sun, Brain } from 'lucide-react';
 
 interface LogEntry {
   timestamp: string;
@@ -12,7 +12,6 @@ interface LogEntry {
 
 const ApiTester: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'console' | 'preview'>('console');
   const [isLoading, setIsLoading] = useState(false);
   const [testCoords, setTestCoords] = useState<{lat: number, lng: number} | null>(null);
 
@@ -110,30 +109,6 @@ const ApiTester: React.FC = () => {
     }
   };
 
-  // 5. Test Maps Libraries
-  const testMapsLibs = () => {
-    addLog('Verificando bibliotecas do Google Maps...', 'info');
-    if (window.google && window.google.maps) {
-        addLog('Google Maps Core: Carregado', 'success');
-        
-        if (window.google.maps.importLibrary) {
-             addLog('Dynamic Import: Suportado', 'success');
-        }
-
-        // Check 3D Element
-        const map3d = customElements.get('gmp-map-3d');
-        if (map3d) {
-             addLog('<gmp-map-3d>: Registrado (API 3D Tiles Ativa)', 'success');
-             setActiveTab('preview');
-        } else {
-             addLog('<gmp-map-3d>: Não registrado. Verifique se v=beta e libraries=maps3d estão na URL.', 'error');
-        }
-
-    } else {
-        addLog('Objeto window.google não encontrado.', 'error');
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-900 text-white font-mono p-4 md:p-8">
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 h-[85vh]">
@@ -169,11 +144,6 @@ const ApiTester: React.FC = () => {
                     <Brain className="w-5 h-5 text-purple-400" />
                     <span>4. Testar Gemini 2.5</span>
                 </button>
-                
-                <button onClick={testMapsLibs} disabled={isLoading} className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors text-left">
-                    <Box className="w-5 h-5 text-red-400" />
-                    <span>5. Verificar 3D Tiles</span>
-                </button>
             </div>
 
             <div className="mt-auto pt-4 border-t border-slate-700">
@@ -183,64 +153,29 @@ const ApiTester: React.FC = () => {
 
         {/* Output Panel */}
         <div className="lg:col-span-2 bg-black rounded-2xl border border-slate-700 overflow-hidden flex flex-col">
-            {/* Tabs */}
-            <div className="flex border-b border-slate-800 bg-slate-900">
-                <button 
-                    onClick={() => setActiveTab('console')}
-                    className={`px-4 py-2 text-sm font-medium ${activeTab === 'console' ? 'bg-black text-white border-t-2 border-orange-500' : 'text-slate-400 hover:text-white'}`}
-                >
-                    Console Output
-                </button>
-                <button 
-                    onClick={() => setActiveTab('preview')}
-                    className={`px-4 py-2 text-sm font-medium ${activeTab === 'preview' ? 'bg-black text-white border-t-2 border-blue-500' : 'text-slate-400 hover:text-white'}`}
-                >
-                    Visual Preview (3D)
-                </button>
+            <div className="bg-slate-900 px-4 py-2 border-b border-slate-800">
+                <span className="text-sm font-bold text-slate-300">Console Output</span>
             </div>
-
-            {/* Console Content */}
-            {activeTab === 'console' && (
-                <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-sm custom-scrollbar">
-                    {logs.length === 0 && <p className="text-slate-600 italic">Aguardando execução de testes...</p>}
-                    {logs.map((log, index) => (
-                        <div key={index} className="border-b border-white/5 pb-2 mb-2 animate-fade-in">
-                            <div className="flex items-start gap-2">
-                                <span className="text-slate-500 text-xs mt-0.5">[{log.timestamp}]</span>
-                                {log.type === 'info' && <span className="text-blue-400">INFO:</span>}
-                                {log.type === 'success' && <span className="text-green-400">OK:</span>}
-                                {log.type === 'error' && <span className="text-red-500">ERR:</span>}
-                                <span className="text-slate-200">{log.message}</span>
-                            </div>
-                            {log.data && (
-                                <pre className="mt-2 bg-slate-900/50 p-2 rounded text-xs text-yellow-100 overflow-x-auto">
-                                    {JSON.stringify(log.data, null, 2)}
-                                </pre>
-                            )}
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-sm custom-scrollbar">
+                {logs.length === 0 && <p className="text-slate-600 italic">Aguardando execução de testes...</p>}
+                {logs.map((log, index) => (
+                    <div key={index} className="border-b border-white/5 pb-2 mb-2 animate-fade-in">
+                        <div className="flex items-start gap-2">
+                            <span className="text-slate-500 text-xs mt-0.5">[{log.timestamp}]</span>
+                            {log.type === 'info' && <span className="text-blue-400">INFO:</span>}
+                            {log.type === 'success' && <span className="text-green-400">OK:</span>}
+                            {log.type === 'error' && <span className="text-red-500">ERR:</span>}
+                            <span className="text-slate-200">{log.message}</span>
                         </div>
-                    ))}
-                </div>
-            )}
-
-            {/* Preview Content */}
-            {activeTab === 'preview' && (
-                <div className="flex-1 relative bg-slate-800">
-                    <div className="absolute inset-0">
-                         {/* @ts-ignore */}
-                         <gmp-map-3d 
-                            center={testCoords ? `${testCoords.lat},${testCoords.lng}` : "-23.5505,-46.6333"} 
-                            range="1000" 
-                            tilt="60" 
-                            heading="45"
-                            style={{width: '100%', height: '100%'}}
-                         />
+                        {log.data && (
+                            <pre className="mt-2 bg-slate-900/50 p-2 rounded text-xs text-yellow-100 overflow-x-auto">
+                                {JSON.stringify(log.data, null, 2)}
+                            </pre>
+                        )}
                     </div>
-                    <div className="absolute top-4 left-4 bg-black/70 p-2 rounded pointer-events-none">
-                        <p className="text-xs text-white">Renderizando Photorealistic 3D Tiles</p>
-                        <p className="text-xs text-slate-400">{testCoords ? `Lat: ${testCoords.lat}` : 'Default Location'}</p>
-                    </div>
-                </div>
-            )}
+                ))}
+            </div>
         </div>
       </div>
     </div>

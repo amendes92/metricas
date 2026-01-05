@@ -3,6 +3,7 @@ import { SolarReportData, SolarPanel } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Sun, DollarSign, Leaf, BatteryCharging, TreePine, Car, RefreshCw, Layers, Grid3X3, Map as MapIcon, Users, CreditCard, CheckCircle, Loader2, X, MessageCircle } from 'lucide-react';
 import { getStaticMapUrl, getApiKey } from '../services/googleMapsService';
+import ShadowClockWidget from './ShadowClockWidget';
 
 interface SolarReportProps {
   data: SolarReportData;
@@ -13,7 +14,12 @@ interface SolarReportProps {
 const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate }) => {
   const [billValue, setBillValue] = useState(data.monthlyBill || 300);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [viewMode, setViewMode] = useState<'heatmap' | 'panels'>('panels');
+  const [viewMode, setViewMode] = useState<'heatmap' | 'panels' | 'shading'>('panels');
+  
+  // 4D Shading State
+  const [timeOfDay, setTimeOfDay] = useState(12); // 12:00
+  const [monthOfYear, setMonthOfYear] = useState(0); // 0 = Jan
+  const [isPlaying, setIsPlaying] = useState(false);
   
   // Growth Hacking States
   const [showCreditModal, setShowCreditModal] = useState(false);
@@ -26,6 +32,25 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapInstance = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
+  const animationRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Animation Loop for 4D Shading
+  useEffect(() => {
+    if (isPlaying && viewMode === 'shading') {
+        animationRef.current = setInterval(() => {
+            setTimeOfDay(prev => {
+                if (prev >= 18) {
+                    setIsPlaying(false);
+                    return 6;
+                }
+                return prev + 0.5; // Increment by 30 mins
+            });
+        }, 200); // Speed of animation
+    } else {
+        if (animationRef.current) clearInterval(animationRef.current);
+    }
+    return () => { if (animationRef.current) clearInterval(animationRef.current); };
+  }, [isPlaying, viewMode]);
 
   // Initialize Standard Maps API (2D Only)
   useEffect(() => {
@@ -95,6 +120,13 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
     };
   }, [data.lat, data.lng, viewMode]);
 
+  // Re-render overlays when 4D params change
+  useEffect(() => {
+      if (viewMode === 'shading') {
+          updateOverlays();
+      }
+  }, [timeOfDay, monthOfYear]);
+
   // Helper to interpolate colors for Heatmap
   const getHeatmapColor = (normalizedValue: number) => {
     if (normalizedValue < 0.5) {
@@ -110,6 +142,54 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         const b = Math.floor(8 + (68 - 8) * t);
         return `rgb(${r},${g},${b})`;
     }
+  };
+
+  // Physics Engine for Solar Intensity (South Hemisphere/Brazil focus)
+  const calculateSolarIntensity = (panelAzimuth: number, hour: number, month: number) => {
+      // 1. Sun Position Calculation (Simplified)
+      // Hour 6 = East (90deg), Hour 12 = North (0/360deg), Hour 18 = West (270deg)
+      // We map hours 6-18 to degrees roughly.
+      
+      // Map hour (6-18) to Sun Azimuth (90 -> 0 -> 270)
+      // Note: In South Hemisphere, sun passes through North.
+      let sunAzimuth = 0;
+      if (hour < 12) {
+          // Morning: East (90) moving to North (0)
+          // Progress 0 (6am) to 1 (12pm)
+          const progress = (hour - 6) / 6; 
+          sunAzimuth = 90 - (90 * progress);
+      } else {
+          // Afternoon: North (360/0) moving to West (270)
+          // Progress 0 (12pm) to 1 (18pm)
+          const progress = (hour - 12) / 6;
+          sunAzimuth = 360 - (90 * progress);
+      }
+
+      // 2. Angular Difference
+      // Calculate delta between Panel Azimuth and Sun Azimuth
+      // Normalize angles to 0-360
+      const pAz = (panelAzimuth + 360) % 360;
+      const sAz = (sunAzimuth + 360) % 360;
+      
+      let delta = Math.abs(pAz - sAz);
+      if (delta > 180) delta = 360 - delta;
+
+      // 3. Intensity base on angle (Cosine similarity-ish)
+      // If delta is 0 (direct hit), intensity is high. If delta is 90, intensity low.
+      // Max intensity window: +/- 70 degrees
+      let angleIntensity = Math.max(0, 1 - (delta / 80)); 
+
+      // 4. Seasonality (Month)
+      // Summer (Dec/Jan) = High sun, less shadows. Winter (Jun/Jul) = Low sun, long shadows.
+      // Brazil: Summer is months 0, 1, 11. Winter is 5, 6, 7.
+      const distFromWinter = Math.abs(month - 6); // 0 in June, 6 in Dec
+      const seasonalFactor = 0.6 + (distFromWinter / 6) * 0.4; // 0.6 in Winter, 1.0 in Summer
+
+      // 5. Time of Day intensity (Bell curve)
+      // Noon is stronger than dawn/dusk
+      const timeFactor = Math.sin(((hour - 6) / 12) * Math.PI);
+
+      return angleIntensity * seasonalFactor * timeFactor;
   };
 
   const updateOverlays = () => {
@@ -138,42 +218,61 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
     const minEnergy = Math.min(...allPanelsEnergy);
     const maxEnergy = Math.max(...allPanelsEnergy);
 
-    if (viewMode === 'panels' || viewMode === 'heatmap') {
-        bestConfig.solarPanels.forEach((panel: SolarPanel) => {
-             const segment = solarPotential.roofSegmentStats[panel.segmentIndex];
-             const azimuth = segment ? segment.azimuthDegrees : 0;
-             const paths = getPanelVertices(panel.center, panel.orientation, azimuth);
-             
-             let fillColor = '#3b82f6';
-             let strokeColor = '#2563eb';
-             let fillOpacity = 0.6;
-             let strokeWeight = 1;
+    bestConfig.solarPanels.forEach((panel: SolarPanel) => {
+            const segment = solarPotential.roofSegmentStats[panel.segmentIndex];
+            const azimuth = segment ? segment.azimuthDegrees : 0;
+            const paths = getPanelVertices(panel.center, panel.orientation, azimuth);
+            
+            let fillColor = '#3b82f6';
+            let strokeColor = '#2563eb';
+            let fillOpacity = 0.6;
+            let strokeWeight = 1;
 
-             if (viewMode === 'heatmap') {
+            if (viewMode === 'heatmap') {
                 const range = maxEnergy - minEnergy || 1;
                 const norm = (panel.yearlyEnergyDcKwh - minEnergy) / range;
                 fillColor = getHeatmapColor(norm);
                 strokeColor = fillColor; 
                 fillOpacity = 0.75; 
                 strokeWeight = 0.5;
-             }
+            } else if (viewMode === 'shading') {
+                // 4D Visualization Logic
+                const intensity = calculateSolarIntensity(azimuth, timeOfDay, monthOfYear);
+                
+                // Base efficiency from API data (so bad panels are always dimmer)
+                const range = maxEnergy - minEnergy || 1;
+                const efficiencyBase = (panel.yearlyEnergyDcKwh - minEnergy) / range;
+                
+                const finalIntensity = intensity * (0.5 + 0.5 * efficiencyBase);
 
-             try {
+                // Golden/Yellow for sun, Dark Blue/Black for shade
+                if (finalIntensity > 0.6) {
+                    fillColor = '#facc15'; // Sunny Yellow
+                    fillOpacity = finalIntensity * 0.8;
+                    strokeColor = '#eab308';
+                } else {
+                    fillColor = '#1e293b'; // Shadow Slate
+                    fillOpacity = 0.8 - finalIntensity; // Darker when less sun
+                    strokeColor = '#0f172a';
+                }
+                strokeWeight = 0;
+            }
+
+            try {
                 const polygon = new window.google.maps.Polygon({
                     paths: paths,
                     strokeColor: strokeColor,
-                    strokeOpacity: 0.9,
+                    strokeOpacity: viewMode === 'shading' ? 0.3 : 0.9,
                     strokeWeight: strokeWeight,
                     fillColor: fillColor,
                     fillOpacity: fillOpacity,
                     map: googleMapInstance.current
                 });
                 overlaysRef.current.push(polygon);
-             } catch (e) {
+            } catch (e) {
                 console.warn("Error creating polygon", e);
-             }
-        });
-    }
+            }
+    });
   };
 
   const getPanelVertices = (center: {latitude: number, longitude: number}, orientation: string, azimuth: number) => {
@@ -247,6 +346,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
   };
 
   const hasSolarData = !!data.solarPotential;
+  const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in-up pb-20">
@@ -273,14 +373,13 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
             />
         )}
         
-        {/* Heatmap Legend - Only visible in heatmap mode */}
+        {/* Heatmap Legend */}
         {viewMode === 'heatmap' && (
             <div className="absolute top-20 right-4 z-20 bg-white/95 backdrop-blur-md p-3 rounded-xl shadow-lg border border-slate-200 w-44 animate-fade-in">
                 <div className="flex items-center gap-2 mb-2">
                     <Sun className="w-3 h-3 text-orange-500" />
                     <p className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">Potencial de Energia</p>
                 </div>
-                {/* Gradient Bar */}
                 <div className="h-2 w-full rounded-full bg-gradient-to-r from-blue-500 via-yellow-500 to-red-500 mb-1"></div>
                 <div className="flex justify-between text-[10px] text-slate-500 font-medium">
                     <span>Baixo</span>
@@ -290,21 +389,40 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
             </div>
         )}
 
+        {/* 4D Shading Widget Integration */}
+        {viewMode === 'shading' && (
+            <ShadowClockWidget 
+                timeOfDay={timeOfDay}
+                monthOfYear={monthOfYear}
+                isPlaying={isPlaying}
+                onTimeChange={setTimeOfDay}
+                onMonthChange={setMonthOfYear}
+                onTogglePlay={() => setIsPlaying(!isPlaying)}
+            />
+        )}
+
         {/* View Controls */}
-        <div className="absolute top-4 right-4 z-20 flex gap-2">
-            <button 
-                onClick={() => setViewMode('heatmap')}
-                className={`p-3 rounded-full backdrop-blur-md border transition-all ${viewMode === 'heatmap' ? 'bg-orange-500/90 border-orange-400 text-white' : 'bg-black/60 border-transparent text-slate-300 hover:bg-black/80'}`}
-                title="Mapa de Calor (Irradiação)"
-            >
-                <Sun className="w-5 h-5" />
-            </button>
+        <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
             <button 
                 onClick={() => setViewMode('panels')}
-                className={`p-3 rounded-full backdrop-blur-md border transition-all ${viewMode === 'panels' ? 'bg-blue-500/90 border-blue-400 text-white' : 'bg-black/60 border-transparent text-slate-300 hover:bg-black/80'}`}
+                className={`p-3 rounded-full backdrop-blur-md border transition-all shadow-md ${viewMode === 'panels' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white border-transparent text-slate-500 hover:bg-slate-50'}`}
                 title="Layout dos Painéis"
             >
                 <Grid3X3 className="w-5 h-5" />
+            </button>
+            <button 
+                onClick={() => setViewMode('heatmap')}
+                className={`p-3 rounded-full backdrop-blur-md border transition-all shadow-md ${viewMode === 'heatmap' ? 'bg-orange-500 border-orange-400 text-white' : 'bg-white border-transparent text-slate-500 hover:bg-slate-50'}`}
+                title="Mapa de Calor (Irradiação)"
+            >
+                <Layers className="w-5 h-5" />
+            </button>
+            <button 
+                onClick={() => setViewMode('shading')}
+                className={`p-3 rounded-full backdrop-blur-md border transition-all shadow-md ${viewMode === 'shading' ? 'bg-yellow-400 border-yellow-300 text-yellow-900' : 'bg-white border-transparent text-slate-500 hover:bg-slate-50'}`}
+                title="Simulação 4D (Time-lapse)"
+            >
+                <Sun className="w-5 h-5" />
             </button>
         </div>
 
@@ -327,7 +445,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                     </h2>
                     <p className="opacity-90 text-lg flex items-center gap-2 text-slate-300">
                         <MapIcon className="w-4 h-4" /> 
-                        {viewMode === 'heatmap' ? 'Análise de Irradiação Solar' : 'Layout Sugerido de Instalação'}
+                        {viewMode === 'heatmap' ? 'Análise de Irradiação Solar' : viewMode === 'shading' ? 'Simulação de Luz Solar' : 'Layout Sugerido de Instalação'}
                     </p>
                 </div>
                 

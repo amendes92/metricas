@@ -1,19 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { Lead } from '../types';
-import { MapPin, Calendar, Zap, CheckCircle, User, Phone, Mail, Download, Map as MapIcon, LayoutGrid, Navigation, Bell, FileText, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Lead, InspectionData } from '../types';
+import { MapPin, Calendar, Zap, CheckCircle, User, Phone, Mail, Download, Map as MapIcon, LayoutGrid, Navigation, Bell, FileText, ChevronDown, CheckSquare, Square, Route, X, Timer, Car, Eye, ClipboardCheck } from 'lucide-react';
 import { getStaticMapUrl, getDirectionsUrl } from '../services/googleMapsService';
 import { jsPDF } from 'jspdf';
+import StreetViewInspector from './StreetViewInspector';
 
 interface LeadMarketplaceProps {
   leads: Lead[];
   onBuyLead: (id: string) => void;
   onUpdateLeadStatus: (id: string, newStatus: any) => void;
+  onSaveInspection?: (id: string, data: InspectionData) => void;
   installerLocation: { lat: number, lng: number };
 }
 
-const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onUpdateLeadStatus, installerLocation }) => {
+interface RouteResult {
+  encodedPolyline: string;
+  waypointOrder: number[];
+  distanceMeters: number;
+  duration: string; // e.g. "3600s"
+}
+
+const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onUpdateLeadStatus, onSaveInspection, installerLocation }) => {
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [notification, setNotification] = useState<Lead | null>(null);
+  
+  // Selection & Route State
+  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [showRouteModal, setShowRouteModal] = useState(false);
+  
+  // Inspection State
+  const [inspectingLead, setInspectingLead] = useState<Lead | null>(null);
+
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<any>(null);
 
   // Feature 10: Simulate Push Notification for new leads nearby
   useEffect(() => {
@@ -40,9 +61,145 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
     return () => clearTimeout(timer);
   }, [installerLocation]);
 
+  // Effect to initialize map when modal opens
+  useEffect(() => {
+      if (showRouteModal && routeResult && mapContainerRef.current && window.google) {
+          initRouteMap();
+      }
+  }, [showRouteModal, routeResult]);
+
+  const toggleLeadSelection = (id: string) => {
+      setSelectedLeads(prev => 
+        prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]
+      );
+  };
+
+  const handleOptimizeRoute = async () => {
+      if (selectedLeads.length < 2) {
+          alert("Selecione pelo menos 2 leads para criar uma rota otimizada.");
+          return;
+      }
+      
+      setIsOptimizing(true);
+      
+      try {
+          // Filter selected objects
+          const destinations = leads
+             .filter(l => selectedLeads.includes(l.id))
+             .map(l => ({ lat: l.lat, lng: l.lng, id: l.id }));
+
+          const response = await fetch('http://localhost:3001/api/optimize-route', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  origin: installerLocation,
+                  destinations: destinations
+              })
+          });
+
+          if (!response.ok) throw new Error("Erro ao otimizar rota");
+          
+          const data = await response.json();
+          setRouteResult(data);
+          setShowRouteModal(true);
+      } catch (error) {
+          console.error(error);
+          alert("Falha ao otimizar rota. Verifique se o servidor está rodando.");
+      } finally {
+          setIsOptimizing(false);
+      }
+  };
+
+  const handleInspectionSave = (data: InspectionData) => {
+      if (inspectingLead && onSaveInspection) {
+          onSaveInspection(inspectingLead.id, data);
+          setInspectingLead(null); // Close modal
+      }
+  };
+
+  const initRouteMap = () => {
+      if (!mapContainerRef.current || !routeResult) return;
+
+      const map = new window.google.maps.Map(mapContainerRef.current, {
+          center: installerLocation,
+          zoom: 12,
+          disableDefaultUI: true,
+          styles: [
+            { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+            { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+            { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+          ]
+      });
+      mapInstanceRef.current = map;
+
+      // Decode Polyline
+      const path = window.google.maps.geometry.encoding.decodePath(routeResult.encodedPolyline);
+      
+      // Draw Route
+      new window.google.maps.Polyline({
+          path: path,
+          geodesic: true,
+          strokeColor: "#FF8C00", // Dark Orange
+          strokeOpacity: 1.0,
+          strokeWeight: 4,
+          map: map
+      });
+
+      // Fit Bounds
+      const bounds = new window.google.maps.LatLngBounds();
+      path.forEach((p: any) => bounds.extend(p));
+      map.fitBounds(bounds);
+
+      // Add Markers
+      
+      // 1. Origin/Installer
+      new window.google.maps.Marker({
+          position: installerLocation,
+          map: map,
+          title: "Início (Base)",
+          icon: {
+             path: window.google.maps.SymbolPath.CIRCLE,
+             scale: 8,
+             fillColor: "#3b82f6",
+             fillOpacity: 1,
+             strokeWeight: 2,
+             strokeColor: "white",
+          }
+      });
+
+      // 2. Stops (Leads)
+      const selectedLeadObjects = leads.filter(l => selectedLeads.includes(l.id));
+      
+      // routeResult.waypointOrder contains the indices of destinations in order
+      // We iterate the order array to place numbered markers
+      routeResult.waypointOrder.forEach((originalIndex, sequenceOrder) => {
+          const lead = selectedLeadObjects[originalIndex];
+          if (!lead) return;
+
+          const markerLabel = (sequenceOrder + 1).toString();
+          
+          new window.google.maps.Marker({
+              position: { lat: lead.lat, lng: lead.lng },
+              map: map,
+              label: { text: markerLabel, color: "white", fontWeight: "bold" },
+              title: lead.homeownerName,
+          });
+      });
+  };
+
   const exportCSV = () => {
-    const headers = ["ID", "Nome", "Endereço", "Sistema (kW)", "Preço", "Status", "Pipeline", "Data"];
-    const rows = leads.map(l => [l.id, l.homeownerName, `"${l.address}"`, l.estimatedSystemSize, l.price, l.status, l.pipelineStatus || 'N/A', l.generatedAt]);
+    const headers = ["ID", "Nome", "Endereço", "Sistema (kW)", "Preço", "Status", "Pipeline", "Vistoria", "Data"];
+    const rows = leads.map(l => [
+        l.id, 
+        l.homeownerName, 
+        `"${l.address}"`, 
+        l.estimatedSystemSize, 
+        l.price, 
+        l.status, 
+        l.pipelineStatus || 'N/A', 
+        l.inspection ? 'Sim' : 'Não',
+        l.generatedAt
+    ]);
     
     const csvContent = "data:text/csv;charset=utf-8," 
         + headers.join(",") + "\n" 
@@ -105,20 +262,16 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
       doc.text(`Produção Média Estimada: ${monthlyProd} kWh/mês`, 20, 140);
       doc.text(`Economia Anual Estimada: ${annualSavings}`, 20, 150);
 
-      // -- Commercial Box --
-      doc.setDrawColor(249, 115, 22);
-      doc.setLineWidth(1);
-      doc.rect(20, 170, pageWidth - 40, 50);
-      
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text("Próximos Passos", 30, 185);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text("1. Visita técnica para avaliação do telhado.", 30, 195);
-      doc.text("2. Aprovação do projeto junto à concessionária.", 30, 205);
-      doc.text("3. Instalação e homologação.", 30, 215);
+      if (lead.inspection) {
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text("Notas de Vistoria (Virtual)", 20, 170);
+          doc.line(20, 173, pageWidth - 20, 173);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.text(`Árvores: ${lead.inspection.hasTree ? 'Sim' : 'Não'} | Poste/Trafo: ${lead.inspection.hasPole ? 'Sim' : 'Não'}`, 20, 180);
+          doc.text(`Obs: ${lead.inspection.accessNotes}`, 20, 188);
+      }
 
       // -- Footer --
       doc.setFontSize(9);
@@ -140,6 +293,13 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
 
   const soldCount = leads.filter(l => l.status === 'sold').length;
   const investment = leads.filter(l => l.status === 'sold').reduce((acc, curr) => acc + curr.price, 0);
+
+  // Helper to get ordered leads for display
+  const getOrderedLeads = () => {
+      if (!routeResult) return [];
+      const selectedLeadObjects = leads.filter(l => selectedLeads.includes(l.id));
+      return routeResult.waypointOrder.map(idx => selectedLeadObjects[idx]);
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 animate-fade-in relative">
@@ -167,6 +327,24 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
           </div>
       )}
 
+      {/* Floating Route Optimizer Button */}
+      {selectedLeads.length > 0 && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 animate-fade-in-up">
+              <button 
+                onClick={handleOptimizeRoute}
+                disabled={isOptimizing}
+                className="bg-slate-900 text-white px-6 py-4 rounded-full shadow-2xl shadow-slate-900/40 flex items-center gap-3 font-bold hover:scale-105 transition-transform"
+              >
+                  {isOptimizing ? (
+                      <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></span>
+                  ) : (
+                      <Route className="w-5 h-5 text-orange-500" />
+                  )}
+                  {isOptimizing ? 'Calculando Rota...' : `Otimizar Rota (${selectedLeads.length})`}
+              </button>
+          </div>
+      )}
+
       {/* Metrics Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -189,7 +367,7 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Mercado de Leads</h2>
-          <p className="text-slate-500">Oportunidades verificadas via satélite.</p>
+          <p className="text-slate-500">Selecione múltiplos leads para criar uma rota de visitas.</p>
         </div>
         
         <div className="flex gap-2">
@@ -230,10 +408,22 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
             {viewMode === 'list' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {leads.map((lead) => (
-                    <div key={lead.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col group">
+                    <div key={lead.id} className={`bg-white rounded-2xl border transition-all duration-300 flex flex-col group relative ${selectedLeads.includes(lead.id) ? 'border-orange-500 ring-2 ring-orange-100 shadow-xl' : 'border-slate-200 hover:shadow-lg'}`}>
                     
+                    {/* Selection Checkbox (Absolute Top Left) */}
+                    <button 
+                        onClick={() => toggleLeadSelection(lead.id)}
+                        className="absolute top-3 left-3 z-20 text-white drop-shadow-md hover:scale-110 transition-transform"
+                    >
+                        {selectedLeads.includes(lead.id) ? (
+                            <CheckSquare className="w-6 h-6 text-orange-500 bg-white rounded-md" />
+                        ) : (
+                            <Square className="w-6 h-6 text-white/80" />
+                        )}
+                    </button>
+
                     {/* Map Header */}
-                    <div className="h-40 bg-slate-100 overflow-hidden relative">
+                    <div className="h-40 bg-slate-100 overflow-hidden relative rounded-t-2xl">
                          <img 
                             src={getStaticMapUrl(lead.lat, lead.lng, 19, '400x200')} 
                             className="w-full h-full object-cover opacity-90 group-hover:scale-110 transition-transform duration-700"
@@ -297,6 +487,23 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
                                     </div>
                                 </div>
 
+                                {/* Virtual Inspection Status / Action */}
+                                <div className="pt-2 border-t border-slate-200/50">
+                                    {lead.inspection ? (
+                                        <div onClick={() => setInspectingLead(lead)} className="flex items-center gap-2 text-green-700 bg-green-50 p-2 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                                            <ClipboardCheck className="w-4 h-4" />
+                                            <span className="text-xs font-bold">Vistoria Realizada</span>
+                                        </div>
+                                    ) : (
+                                        <button 
+                                            onClick={() => setInspectingLead(lead)}
+                                            className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 py-2 rounded-lg text-xs font-bold transition-colors"
+                                        >
+                                            <Eye className="w-3 h-3" /> Fazer Vistoria Virtual
+                                        </button>
+                                    )}
+                                </div>
+
                                 {/* Mini-CRM Actions */}
                                 <div className="pt-3 border-t border-slate-200">
                                     <p className="text-[10px] uppercase font-bold text-slate-400 mb-2">Gestão do Lead</p>
@@ -347,7 +554,7 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
                         </div>
                     </div>
 
-                    <div className="p-4 bg-slate-50 border-t border-slate-100">
+                    <div className="p-4 bg-slate-50 border-t border-slate-100 rounded-b-2xl">
                         {lead.status === 'available' ? (
                         <button 
                             onClick={() => onBuyLead(lead.id)}
@@ -398,6 +605,106 @@ const LeadMarketplace: React.FC<LeadMarketplaceProps> = ({ leads, onBuyLead, onU
                 </div>
             )}
         </>
+      )}
+
+      {/* Street View Inspection Modal */}
+      {inspectingLead && (
+          <div className="fixed inset-0 bg-black/90 z-[110] p-4 flex items-center justify-center animate-scale-in">
+              <div className="w-full max-w-6xl h-[85vh] relative">
+                   <StreetViewInspector 
+                       lat={inspectingLead.lat}
+                       lng={inspectingLead.lng}
+                       initialData={inspectingLead.inspection}
+                       onSave={handleInspectionSave}
+                       onClose={() => setInspectingLead(null)}
+                   />
+              </div>
+          </div>
+      )}
+
+      {/* Route Optimization Modal */}
+      {showRouteModal && routeResult && (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-5xl h-[80vh] flex overflow-hidden shadow-2xl animate-scale-in relative">
+                  <button 
+                    onClick={() => setShowRouteModal(false)}
+                    className="absolute top-4 right-4 z-50 bg-white p-2 rounded-full shadow-lg hover:bg-slate-100"
+                  >
+                      <X className="w-5 h-5 text-slate-600" />
+                  </button>
+
+                  {/* Sidebar List */}
+                  <div className="w-1/3 bg-slate-50 border-r border-slate-200 flex flex-col">
+                      <div className="p-6 bg-white border-b border-slate-100">
+                          <h3 className="text-xl font-bold flex items-center gap-2 mb-1">
+                              <Route className="w-5 h-5 text-orange-500" />
+                              Rota Otimizada
+                          </h3>
+                          <div className="flex gap-4 text-xs text-slate-500 mt-2">
+                              <span className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded">
+                                  <Car className="w-3 h-3" /> {(routeResult.distanceMeters / 1000).toFixed(1)} km
+                              </span>
+                              <span className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded">
+                                  <Timer className="w-3 h-3" /> {(parseInt(routeResult.duration) / 60).toFixed(0)} min
+                              </span>
+                          </div>
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                          <div className="flex gap-3 items-center opacity-50">
+                              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                  Inicio
+                              </div>
+                              <p className="text-sm font-medium">Sua Base</p>
+                          </div>
+                          
+                          {/* Render Ordered Stops */}
+                          {getOrderedLeads().map((lead, index) => (
+                              <div key={lead.id} className="flex gap-3 items-start p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                                  <div className="w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                                      {index + 1}
+                                  </div>
+                                  <div>
+                                      <p className="font-bold text-slate-800 text-sm">{lead.homeownerName}</p>
+                                      <p className="text-xs text-slate-500 line-clamp-1">{lead.address}</p>
+                                      <div className="flex gap-2 mt-2">
+                                          <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                                              {lead.estimatedSystemSize} kWp
+                                          </span>
+                                          {lead.inspection && (
+                                              <span className="text-[10px] bg-green-100 px-2 py-0.5 rounded text-green-700 border border-green-200 flex items-center gap-1">
+                                                  <ClipboardCheck className="w-3 h-3" /> Vistoriado
+                                              </span>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                          ))}
+
+                          <div className="flex gap-3 items-center opacity-50">
+                              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                  Fim
+                              </div>
+                              <p className="text-sm font-medium">Retorno à Base</p>
+                          </div>
+                      </div>
+                      
+                      <div className="p-4 border-t border-slate-200 bg-white">
+                          <button 
+                            onClick={() => window.alert('Navegação enviada para o App Mobile (Simulado)')}
+                            className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 flex items-center justify-center gap-2"
+                          >
+                              <Navigation className="w-4 h-4" /> Iniciar Navegação
+                          </button>
+                      </div>
+                  </div>
+
+                  {/* Map Area */}
+                  <div className="w-2/3 bg-slate-200 relative">
+                      <div ref={mapContainerRef} className="w-full h-full" />
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

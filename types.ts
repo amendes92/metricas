@@ -65,6 +65,14 @@ export interface SolarPanelConfig {
     solarPanels: SolarPanel[];
 }
 
+export interface InspectionData {
+  hasTree: boolean;
+  hasPole: boolean;
+  roofVisible: boolean;
+  accessNotes: string;
+  inspectedAt: string;
+}
+
 export interface Lead {
   id: string;
   homeownerName: string;
@@ -80,6 +88,8 @@ export interface Lead {
   distanceKm?: number; // Distance from installer
   // CRM Status
   pipelineStatus?: 'Novo' | 'Contatado' | 'Visita' | 'Fechado';
+  // Virtual Inspection
+  inspection?: InspectionData;
 }
 
 export enum UserMode {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserMode, SolarReportData, Lead, InstallerProfile } from './types';
+import { UserMode, SolarReportData, Lead, InstallerProfile, InspectionData } from './types';
 import { generateSolarReportWithData } from './services/geminiService';
 import { getCoordinates, getSolarInsights, getApiKey } from './services/googleMapsService';
 import SolarReport from './components/SolarReport';
@@ -145,6 +145,12 @@ const App: React.FC = () => {
   const updateLeadStatus = (id: string, newStatus: any) => {
       setLeads(prev => prev.map(lead =>
           lead.id === id ? { ...lead, pipelineStatus: newStatus } : lead
+      ));
+  };
+
+  const saveInspection = (id: string, data: InspectionData) => {
+      setLeads(prev => prev.map(lead =>
+          lead.id === id ? { ...lead, inspection: data } : lead
       ));
   };
 
@@ -360,6 +366,7 @@ const App: React.FC = () => {
                 leads={leads} 
                 onBuyLead={buyLead} 
                 onUpdateLeadStatus={updateLeadStatus}
+                onSaveInspection={saveInspection}
                 installerLocation={installerProfile.location} 
             />
           </div>

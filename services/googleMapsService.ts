@@ -10,7 +10,10 @@ export const getApiKey = () => {
   
   try {
     if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-      return process.env.API_KEY;
+      // Check if process.env.API_KEY is actually set and not an empty placeholder
+      if (process.env.API_KEY.length > 10) {
+        return process.env.API_KEY;
+      }
     }
   } catch (e) {
     // process is not defined

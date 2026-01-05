@@ -7,7 +7,8 @@ import LeadMarketplace from './components/LeadMarketplace';
 import ChatAssistant from './components/ChatAssistant';
 import AddressAutocomplete from './components/AddressAutocomplete';
 import ApiTester from './components/ApiTester';
-import { LayoutDashboard, Home, Sun, Lock, LogIn, X, Settings, Key, FlaskConical } from 'lucide-react';
+import SystemDiagnostics from './components/SystemDiagnostics';
+import { LayoutDashboard, Home, Sun, Lock, LogIn, X, Settings, Key, FlaskConical, Activity } from 'lucide-react';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<UserMode>(UserMode.HOMEOWNER);
@@ -173,6 +174,25 @@ const App: React.FC = () => {
     );
   }
 
+  if (mode === UserMode.DIAGNOSTICS) {
+    return (
+      <div className="min-h-screen bg-black">
+        <nav className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-50">
+           <div className="max-w-7xl mx-auto flex justify-between items-center text-white">
+              <div className="flex items-center gap-2">
+                 <Activity className="w-6 h-6 text-orange-500" />
+                 <span className="font-bold text-lg">Logs de Diagnóstico</span>
+              </div>
+              <button onClick={() => setMode(UserMode.HOMEOWNER)} className="text-sm hover:text-orange-400 transition-colors">
+                 Voltar para App
+              </button>
+           </div>
+        </nav>
+        <SystemDiagnostics />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Navigation */}
@@ -211,6 +231,15 @@ const App: React.FC = () => {
                 title="Testar APIs"
               >
                   <FlaskConical className="w-5 h-5" />
+              </button>
+
+              {/* Diagnostics Button (New) */}
+              <button 
+                onClick={() => setMode(UserMode.DIAGNOSTICS)}
+                className="p-2 text-slate-500 hover:text-orange-600 hover:bg-orange-50 rounded-full transition-colors"
+                title="Diagnóstico de Sistema (Logs)"
+              >
+                  <Activity className="w-5 h-5" />
               </button>
 
               {/* Settings Button */}

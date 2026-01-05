@@ -10,28 +10,6 @@ interface SolarReportProps {
   onRecalculate: (newBill: number) => Promise<void>;
 }
 
-declare global {
-    interface Window {
-        google: any;
-        initMap: () => void;
-    }
-    namespace JSX {
-        interface IntrinsicElements {
-            'gmp-map-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-                center?: string; // lat,lng string or object
-                tilt?: string | number;
-                heading?: string | number;
-                range?: string | number;
-                'default-labels-disabled'?: boolean | string;
-            };
-            'gmp-marker-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-                position?: string;
-                'altitude-mode'?: string;
-            };
-        }
-    }
-}
-
 const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate }) => {
   const [billValue, setBillValue] = useState(data.monthlyBill || 300);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -49,7 +27,6 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
 
     const initMap = () => {
         if (!isMounted) return;
-        if (viewMode !== 'cinematic' && !mapRef.current) return;
         
         // 2D Map Logic
         if (viewMode !== 'cinematic' && mapRef.current && window.google && window.google.maps) {
@@ -92,12 +69,12 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
             script.src = `https://maps.googleapis.com/maps/api/js?key=${getApiKey()}&v=beta&libraries=maps3d,geometry,places`;
             script.async = true;
             script.defer = true;
+            script.crossOrigin = "anonymous"; // Helps with capturing specific script errors
             script.onload = () => {
                 if (isMounted) initMap();
             };
             script.onerror = (e) => {
                 console.error("Google Maps API failed to load", e);
-                // Try to handle script error gracefully?
             };
             document.head.appendChild(script);
         }
@@ -105,7 +82,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
 
     return () => {
         isMounted = false;
-        // Cleanup listener if possible, though standard addEventListener on element doesn't have easy removal without ref to function
+        // Cleanup listener if possible
         const scriptId = 'google-maps-script';
         const existingScript = document.getElementById(scriptId) as HTMLScriptElement;
         if (existingScript) {
@@ -116,12 +93,19 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
 
   // Animation Logic for 3D Mode
   useEffect(() => {
-      if (viewMode === 'cinematic' && map3dRef.current) {
+      if (viewMode === 'cinematic') {
           let angle = 0;
           const animate = () => {
+              // Safety check: Ensure ref exists and component is still in 3D mode
               if (map3dRef.current) {
                   angle = (angle + 0.1) % 360; // Smooth rotation
-                  map3dRef.current.heading = angle;
+                  try {
+                      // Only set property if the element is upgraded and property exists to avoid Script Errors
+                      // or just set it safely
+                      map3dRef.current.heading = angle;
+                  } catch (e) {
+                      // Element might not be upgraded yet, ignore
+                  }
               }
               animationRef.current = requestAnimationFrame(animate);
           };
@@ -255,6 +239,7 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
         {/* Render Logic: 3D Mode vs 2D Mode */}
         {viewMode === 'cinematic' ? (
              <div className="w-full h-full animate-fade-in">
+                 {/* @ts-ignore */}
                  <gmp-map-3d 
                     ref={map3dRef}
                     center={`${data.lat},${data.lng}`} 
@@ -264,12 +249,15 @@ const SolarReport: React.FC<SolarReportProps> = ({ data, onUnlock, onRecalculate
                     style={{width: '100%', height: '100%'}}
                  >
                      {/* Marker anchored to the 3D mesh */}
+                     {/* @ts-ignore */}
                      <gmp-marker-3d position={`${data.lat},${data.lng}`} altitude-mode="RELATIVE_TO_MESH">
                         <div className="bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-xl border border-white transform -translate-y-8 flex flex-col items-center">
                             <span>Sua Casa</span>
                             <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-orange-600 absolute -bottom-2"></div>
                         </div>
+                     {/* @ts-ignore */}
                      </gmp-marker-3d>
+                 {/* @ts-ignore */}
                  </gmp-map-3d>
                  <div className="absolute top-4 left-4 z-20 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-white/20">
                      <span className="text-white text-xs font-bold flex items-center gap-2">

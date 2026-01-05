@@ -85,6 +85,7 @@ export enum UserMode {
   HOMEOWNER = 'HOMEOWNER',
   INSTALLER = 'INSTALLER',
   TEST_MODE = 'TEST_MODE',
+  DIAGNOSTICS = 'DIAGNOSTICS',
 }
 
 export interface ChatMessage {
@@ -101,8 +102,13 @@ export interface InstallerProfile {
   location: { lat: number, lng: number };
 }
 
-// Google Maps 3D Types
+// Google Maps 3D Types & Global Augmentations
 declare global {
+  interface Window {
+    google: any;
+    initMap: () => void;
+  }
+  
   namespace JSX {
     interface IntrinsicElements {
       'gmp-map-3d': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
